@@ -126,6 +126,13 @@ async function until(check, message) {
   assert.equal(await run('document.querySelector("#firmware-update").textContent'), `Update to ${bundled}`);
   // A real board may be plugged into this machine: the app must refuse to flash during tests.
   await assert.rejects(run('window.control.updateFirmware()'), /disabled in automated tests/);
+  await assert.rejects(run('window.control.recoverFirmware()'), /disabled in automated tests/);
+  await run(`(() => { const preview=structuredClone(state); preview.firmware.update={running:false,stage:'Board recovery needs attention',progress:0.98,error:'Board did not return',installed:null,recoveryAvailable:true}; receive(preview); })()`);
+  assert.equal(await run('document.querySelector("#firmware-recover").hidden'), false);
+  assert.equal(await run('document.querySelector("#fw-progress").hidden'), false);
+  await run(`document.dispatchEvent(new KeyboardEvent('keydown',{key:'r',code:'KeyR',altKey:true,bubbles:true}));`);
+  await until(async () => await run('document.querySelector("#toast").textContent.includes("recovery is disabled in automated tests")'), 'Keyboard recovery did not reach the guarded IPC');
+  await run('window.control.getState().then(receive)');
   await run(`document.querySelector('#output-device').value = 'bluetooth'; document.querySelector('#output-device').dispatchEvent(new Event('change', { bubbles: true }));`);
   await until(async () => (await snapshot()).settings.output === 'bluetooth' && (await snapshot()).runtime.output === 'bluetooth', 'Bluetooth selection did not reach the worker');
   assert.equal((await snapshot()).runtime.enabled, false);

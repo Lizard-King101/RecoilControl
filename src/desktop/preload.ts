@@ -9,6 +9,7 @@ contextBridge.exposeInMainWorld('control', {
   setBoardBrightness: (brightness: number) => ipcRenderer.invoke('control:board-brightness', brightness),
   setLedCount: (count: number) => ipcRenderer.invoke('control:board-led-count', count),
   updateFirmware: () => ipcRenderer.invoke('control:firmware-update'),
+  recoverFirmware: () => ipcRenderer.invoke('control:firmware-recover'),
   pairBoardMouse: () => ipcRenderer.invoke('control:board-pair-mouse'),
   resetRelayStats: () => ipcRenderer.invoke('control:board-reset-stats'),
   testBoardMovement: () => ipcRenderer.invoke('control:board-test'),

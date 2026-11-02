@@ -24,6 +24,7 @@
     "demo": "npm run build && node build/index.js --demo",
     "test": "npm run build && node --test tests/*.test.cjs",
     "test:desktop": "npm run build && electron tests/desktop-smoke.cjs",
+    "screenshots": "npm run build && electron scripts/screenshots.cjs",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

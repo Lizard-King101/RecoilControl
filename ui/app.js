@@ -160,7 +160,7 @@ function ledState() {
   return ['standby', 'armed', 'paused'][relay.indicator];
 }
 function firmwareCard() {
-  return `<section class="card" style="margin-top:20px"><div class="card-kicker">FIRMWARE</div><h2>Keep the board up to date.</h2><div class="firmware-row"><div><span class="stat-label">On the board</span><span id="fw-board" class="stat-value">—</span></div><div><span class="stat-label">Included with the app</span><span id="fw-bundled" class="stat-value">—</span></div><button id="firmware-update" class="button" data-action="firmware-update">Update firmware</button></div><div id="fw-progress" class="fw-progress" hidden><div class="fw-bar"><span id="fw-bar"></span></div><p id="fw-stage" class="hint"></p></div><p id="fw-error" class="dialog-error" hidden></p><p class="hint">Keep USB plugged in during the update (about 20 seconds). Bluetooth pairings, brightness, and LED count are kept, and the app reconnects by itself afterwards.</p></section>`;
+  return `<section class="card" style="margin-top:20px"><div class="card-kicker">FIRMWARE</div><h2>Keep the board up to date.</h2><div class="firmware-row"><div><span class="stat-label">On the board</span><span id="fw-board" class="stat-value">—</span></div><div><span class="stat-label">Included with the app</span><span id="fw-bundled" class="stat-value">—</span></div><button id="firmware-update" class="button" data-action="firmware-update">Update firmware</button><button id="firmware-recover" class="button subtle" data-action="firmware-recover" hidden>Retry board recovery · Alt+R</button></div><div id="fw-progress" class="fw-progress" hidden><div class="fw-bar"><span id="fw-bar"></span></div><p id="fw-stage" class="hint"></p></div><p id="fw-error" class="dialog-error" hidden></p><p class="hint">Mouse passthrough pauses while firmware is written and the board restarts. Keep USB plugged in and the app open; allow about 30 seconds after writing for the mouse and Windows to reconnect. Pairings and LED settings are kept. If recovery stalls, press Alt+R to retry without writing again. RESET (without BOOT) or reconnecting USB can restart the board; an interrupted firmware write needs another update.</p></section>`;
 }
 const versionOrder = (a, b) => { const x = a.split('.').map(Number), y = b.split('.').map(Number); return (x[0] - y[0]) || (x[1] - y[1]) || (x[2] - y[2]); };
 function statusLightsCard() {
@@ -286,7 +286,9 @@ function updateLive() {
       : order === 0 ? `Reinstall ${bundled}` : order > 0 ? `Install ${bundled} (older)` : `Update to ${bundled}`;
     $('#firmware-update').classList.toggle('subtle', order >= 0 && !firmwareConfirm);
     $('#firmware-update').disabled = !bundled || update.running;
-    $('#fw-progress').hidden = !update.running && !update.installed;
+    $('#firmware-recover').hidden = !update.recoveryAvailable;
+    $('#firmware-recover').disabled = update.running;
+    $('#fw-progress').hidden = !update.stage;
     $('#fw-bar').style.width = `${Math.round((update.progress ?? 0) * 100)}%`;
     $('#fw-stage').textContent = update.stage ?? '';
     $('#fw-error').textContent = update.error ?? '';
@@ -442,7 +444,8 @@ document.addEventListener('click', event => {
         // Two presses: the first only asks, since the update briefly takes the board offline.
         if (!firmwareConfirm) { firmwareConfirm = true; setTimeout(() => { firmwareConfirm = false; updateLive(); }, 6000); updateLive(); break; }
         firmwareConfirm = false; toast('Updating the board. Keep USB plugged in.');
-        receive(await api.updateFirmware(), true); toast('Firmware installed. Reconnecting to the board.'); break;
+        receive(await api.updateFirmware(), true); toast(state.firmware.update.error || state.firmware.update.stage, !!state.firmware.update.error); break;
+      case 'firmware-recover': receive(await api.recoverFirmware(), true); toast(state.firmware.update.error || state.firmware.update.stage, !!state.firmware.update.error); break;
       case 'board-led-count': receive(await api.setLedCount(Number($('#board-led-count').value))); toast('LED count saved on the board.'); break;
       case 'board-test': receive(await api.testBoardMovement()); toast('One movement report submitted. Board is disabled again.'); break;
       case 'toggle': receive(await api.setEnabled(!state.runtime.enabled)); break;
@@ -551,3 +554,10 @@ document.addEventListener('wheel', event => {
   $('#relay-browser-events').textContent = `Windows events: left ${relayBrowserCounts.buttons[0]}, middle ${relayBrowserCounts.buttons[1]}, right ${relayBrowserCounts.buttons[2]}, side ${relayBrowserCounts.buttons[3] + relayBrowserCounts.buttons[4]}, wheel ${relayBrowserCounts.wheel}`;
 }, { passive: true });
 void attempt(async () => receive(await api.getState()));
+
+// A keyboard-only way back when the only mouse is routed through the board.
+document.addEventListener('keydown', event => {
+  if (!event.altKey || event.ctrlKey || event.shiftKey || event.code !== 'KeyR' || event.repeat || !state?.firmware.update.recoveryAvailable || state.firmware.update.running) return;
+  event.preventDefault();
+  void attempt(async () => { receive(await api.recoverFirmware(), true); toast(state.firmware.update.error || state.firmware.update.stage, !!state.firmware.update.error); });
+});

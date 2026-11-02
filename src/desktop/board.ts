@@ -87,7 +87,8 @@ export function parseBoardStatus(value: unknown): BoardStatus | null {
 export async function listBoardPorts() {
   return (await SerialPort.list()).filter(port => ['303a', '2886'].includes(port.vendorId?.toLowerCase() ?? ''))
     .map(port => ({ path: port.path, label: `${port.path} · ${port.manufacturer ?? 'ESP32 USB'}`,
-      usbVendorId: parseInt(port.vendorId ?? '', 16) || undefined, usbProductId: parseInt(port.productId ?? '', 16) || undefined }));
+      usbVendorId: parseInt(port.vendorId ?? '', 16) || undefined, usbProductId: parseInt(port.productId ?? '', 16) || undefined,
+      serialNumber: port.serialNumber || undefined }));
 }
 
 export class BoardConnection {

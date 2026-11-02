@@ -13,7 +13,8 @@ ESP32 RMT implementation. Versions are pinned in `platformio.ini`.
 
 ## Hardware and power
 
-- Seeed Studio XIAO ESP32-C3, confirmed on **COM3**.
+- Seeed Studio XIAO ESP32-C3. **COM3** is the example port used below; substitute
+  the port shown on your machine.
 - 24 WS2812B LEDs, data on **D7 = GPIO20**, USB/5V power and common ground.
 - Native USB Serial/JTAG carries setup and telemetry. It is not a USB mouse host;
   use the Cobra's Bluetooth mode, not its USB cable or 2.4 GHz dongle.
@@ -30,6 +31,9 @@ unplugging its only power source stops it.
 
 ## Build and pair
 
+Install PlatformIO Core (or the PlatformIO IDE extension) and make `pio` available
+in your terminal. From the repository root:
+
 ```powershell
 npm run firmware:build
 npm run firmware:upload -- --upload-port COM3
@@ -45,10 +49,11 @@ each by MD5, and never rewrites the bootloader, partition table, or NVS.
 Disconnect the app from COM3 before uploading or using a serial monitor. Keep
 a second mouse available for setup.
 
-1. In Windows Bluetooth settings, remove the old **Recoil Control C3** entry and
-   add **Mouse Relay C3**. Version 0.3 changes the HID descriptor and clears this
-   board's old bonds once. Subsequent uploads retain pairings.
-2. Open **ESP32 board** in the app and connect COM3. The screen switches to
+1. In Windows Bluetooth settings, add **Mouse Relay C3**. If migrating from
+   pre-0.3 firmware, first remove the old **Recoil Control C3** entry: version 0.3
+   changes the HID descriptor and clears old board bonds once. Subsequent uploads retain pairings.
+2. Open **Setup → Board & Bluetooth** in the app and connect your board's port.
+   A single connected board is picked up automatically. The screen switches to
    relay controls. Existing 0.3 pairings are retained: the Windows HID format and
    Bluetooth identity are unchanged. Driver capture stays disabled.
 3. Switch the Cobra Pro to **BT**. Hold **button 5 + wheel click + right button**
@@ -66,11 +71,12 @@ Only a successful encrypted HID connection replaces the saved identity.
 
 ## Desktop testing
 
-Select a configured weapon and connect COM3. **Enter + Numpad Plus** toggles
+Select a configured weapon and connect the board. **F7** toggles
 compensation; **Escape** disables. Shift and configuration focus pause corrections;
 release fire before resuming. Right mouse selects ADS; Ctrl selects crouch.
 Fire/ADS come directly from the Cobra's BLE reports. Keyboard shortcuts use normal
 Windows hooks, without Interception. The HUD shows the weapon and **RELAY / ACTIVE**.
+These are the desktop defaults; **Controls** saves separate bindings per game.
 
 Only Assault Rifle contains the original legacy recoil values. This integration
 does not update or certify those patterns for current Rust. Start with a short
@@ -200,8 +206,28 @@ with the same session. The worker check stalls Electron's main thread and checks
 continued heartbeats and blocked recoil. Neither generates physical test motion.
 
 The old `test:board-profile -- --move` is for firmware 0.2 and is not a relay test.
-Current Rust compatibility and calibration remain unverified. Keep separate
-CLI/driver controllers closed during passthrough testing.
+The relay input path has been user-tested in Rust; current recoil calibration
+remains unverified. Keep separate CLI/driver controllers closed during testing.
+
+### In-app update validation, 2026-11-02
+
+Firmware 0.7.0 was successfully reinstalled through the desktop updater, and the
+user confirmed that the update and restart worked. The app now verifies the
+running firmware, startup checks, fresh telemetry, and stable Bluetooth links
+before reporting completion. The final automated run passed 105 regression tests
+and the isolated desktop checks; it did not reflash the board.
+
+The reset uses an explicit RTS pulse with DTR released. The bundled
+[esptool-js 0.7.0 hard reset](https://github.com/espressif/esptool-js/blob/v0.7.0/src/reset.ts)
+only releases RTS, which could leave this board in the flasher. Recovery releases
+the serial handle, follows USB identity across COM changes, and makes at most two
+additional reset attempts if firmware does not answer. A responding application
+waiting for Bluetooth is not repeatedly reset.
+
+If recovery times out, focus the main window and press **Alt+R** or choose
+**Retry board recovery**. This does not rewrite flash. See the
+[update and recovery instructions](../README.md#firmware-updates-and-recovery)
+for physical recovery and interrupted-write limitations.
 
 ### Local bring-up, 2026-11-01
 
@@ -247,7 +273,8 @@ app the firmware can record. Protocol 4 and HELLO RC4 are unchanged.
 
 Firmware 0.5.0 was flashed and used for pull recording, and 0.6.0 for the first LED
 effects. 0.7.0 (breathing, full-ring recording, 0–255 brightness with the power
-limiter, saved LED count) compiles with the pinned toolchain but has not been flashed yet. After uploading, run `npm run test:board-worker` with the
+limiter, saved LED count) has also been flashed and reinstalled with the desktop
+updater. After uploading, run `npm run test:board-worker` with the
 relay connected: it starts and stops a recording and checks that compensation stays
 off and no corrections are sent.
 
@@ -270,6 +297,9 @@ had exited and a new instance was running. COM3 was busy during the later serial
 probe, so no fresh serial-counter result is claimed for the manual quit-app test.
 
 ## Profile-output backup
+
+The backup files below are local bring-up artifacts, ignored by Git and **not
+included in a clone**. These restore instructions only apply if you have those files.
 
 The verified passthrough-only 0.3 firmware is saved in
 `backups/passthrough-0.3.0.bin` and `backups/passthrough-0.3.0-source.zip`.

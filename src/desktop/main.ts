@@ -6,7 +6,8 @@ import { applyLiveTuning, effectiveProfile, selected, selectWeapon, SettingsStor
 import { RecoilEngine } from '../recoil-engine';
 import type { AntiRecoil } from '../anti-recoil';
 import { idleBoardState, listBoardPorts } from './board';
-import { flashFirmware, idleFirmwareUpdate, loadRelease } from './firmware-update';
+import { flashFirmware, FirmwareFlashError, idleFirmwareUpdate, loadRelease, restartFirmwarePort } from './firmware-update';
+import { FirmwarePort, recoverFirmware } from './firmware-recovery';
 import { idleTuning } from '../live-tuning';
 import { idleRecording } from '../pull-recording';
 import { defaultBindings, keyChoices } from '../key-bindings';
@@ -45,6 +46,8 @@ const firmwareDirectory = join(root, 'firmware/release');
 let bundledFirmware: string | null = null;
 try { bundledFirmware = loadRelease(firmwareDirectory)?.version ?? null; } catch (error) { console.error('Bundled firmware:', error); }
 let firmwareUpdate = idleFirmwareUpdate();
+let firmwareOperationPending = false;
+let firmwareRecovery: { target: FirmwarePort; expectedVersion: string | null; requireRelay: boolean; failure: string | null } | null = null;
 function state() { return { settings, runtime, board: boardState, firmware: { bundled: bundledFirmware, update: firmwareUpdate }, warning: store.warning, shortcutReady, version: app.getVersion(), keyChoices, defaultBindings: defaultBindings() }; }
 function broadcast() {
   if (hud && !hud.isDestroyed()) {
@@ -55,11 +58,11 @@ function broadcast() {
     if (window && !window.isDestroyed()) window.webContents.send('control:state', state());
   }
 }
-function command(command: string, value?: unknown): Promise<void> {
+function command(command: string, value?: unknown, timeoutMs = 4000): Promise<void> {
   if (!worker) return Promise.reject(new Error('Input process is unavailable. Restart the application.'));
   return new Promise((resolve, reject) => {
     const id = ++requestId;
-    const timer = setTimeout(() => { pending.delete(id); reject(new Error('The input process did not respond.')); }, 4000);
+    const timer = setTimeout(() => { pending.delete(id); reject(new Error('The input process did not respond.')); }, timeoutMs);
     pending.set(id, { resolve, reject, timer });
     worker!.postMessage({ id, command, value });
   });
@@ -188,19 +191,44 @@ function handle(channel: string, handler: (event: IpcMainInvokeEvent, value: unk
 let autoConnectDeclined: string | null = null;
 let autoConnectRetryAt = 0;
 async function autoConnect() {
-  if (!worker || quitting || firmwareUpdate.running || boardState.connected || runtime.tuning.dirty || Date.now() < autoConnectRetryAt) return;
+  if (!worker || quitting || firmwareUpdate.running || firmwareUpdate.recoveryAvailable || boardState.connected || runtime.tuning.dirty || Date.now() < autoConnectRetryAt) return;
   const ports = await listBoardPorts();
   if (autoConnectDeclined && !ports.some(port => port.path === autoConnectDeclined)) autoConnectDeclined = null;
   const candidates = ports.filter(port => port.path !== autoConnectDeclined);
   if (candidates.length !== 1) return; // None, or several boards: leave the choice to the user.
   await serialize(async () => {
-    if (boardState.connected || runtime.tuning.dirty) return;
+    if (quitting || firmwareUpdate.running || firmwareUpdate.recoveryAvailable || boardState.connected || runtime.tuning.dirty || Date.now() < autoConnectRetryAt) return;
     await command('board-connect', candidates[0].path);
   }).catch(error => { autoConnectRetryAt = Date.now() + 15000; console.error('Board auto-connect:', error); });
 }
 
-// Installs the bundled firmware over USB. The app lets go of the port first (which also stops
-// compensation and any recording), then auto-connect picks the board up again after it restarts.
+async function finishFirmwareRecovery() {
+  if (!firmwareRecovery) throw new Error('There is no pending board recovery.');
+  const pendingRecovery = firmwareRecovery;
+  firmwareUpdate = { ...firmwareUpdate, running: true, error: null, recoveryAvailable: false, stage: 'Checking the board after restart' };
+  broadcast();
+  try {
+    const result = await recoverFirmware({ ...pendingRecovery, ports: listBoardPorts,
+      state: () => boardState,
+      connect: path => command('board-connect', path, 8000),
+      disconnect: () => command('board-disconnect', undefined, 8000),
+      restart: port => restartFirmwarePort(port.path, port),
+      progress: stage => { firmwareUpdate = { ...firmwareUpdate, stage, progress: 0.98 }; broadcast(); },
+    });
+    firmwareRecovery = null;
+    firmwareUpdate = { ...idleFirmwareUpdate(), progress: 1,
+      installed: pendingRecovery.failure ? null : result.version,
+      stage: result.relayReady ? `Firmware ${result.version} is running. Both mouse links are connected.` : `Firmware ${result.version} is running. Pair the mouse and Windows to use the relay.`,
+      error: pendingRecovery.failure ? `${pendingRecovery.failure} The board is running ${result.version} again; retry the update when ready.` : null };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    firmwareUpdate = { ...firmwareUpdate, running: false, installed: null, recoveryAvailable: true,
+      stage: 'Board recovery needs attention', error: [pendingRecovery.failure, message].filter(Boolean).join(' ') };
+  } finally { autoConnectDeclined = null; autoConnectRetryAt = Date.now() + 2500; broadcast(); }
+}
+
+// Flash, release the port, and verify the running application plus mouse links.
+// General auto-connect stays out of the way until this transaction finishes.
 async function updateFirmware() {
   // Test runs share this machine with real hardware and must never flash it.
   if (headlessTest) throw new Error('Firmware updates are disabled in automated tests.');
@@ -210,30 +238,46 @@ async function updateFirmware() {
   const ports = await listBoardPorts();
   const target = ports.find(port => port.path === boardState.path) ?? (ports.length === 1 ? ports[0] : undefined);
   if (!target) throw new Error(ports.length ? 'Several boards are plugged in. Connect the one to update first.' : 'Plug in the board over USB first.');
+  const boardBeforeUpdate = boardState.status;
+  firmwareRecovery = null;
   let lastBroadcast = 0;
   firmwareUpdate = { ...idleFirmwareUpdate(), running: true, stage: 'Disconnecting the app from the board' };
   broadcast();
   try {
     await command('board-disconnect');
+    firmwareRecovery = { target, expectedVersion: release.version,
+      requireRelay: !boardBeforeUpdate || !!boardBeforeUpdate.relay?.savedMouse || !!boardBeforeUpdate.ble, failure: null };
     await flashFirmware(target.path, target, release, (stage, progress) => {
       firmwareUpdate = { ...firmwareUpdate, stage, progress };
       if (Date.now() - lastBroadcast > 150) { lastBroadcast = Date.now(); broadcast(); }
     });
-    firmwareUpdate = { ...idleFirmwareUpdate(), stage: `Installed ${release.version}. Reconnecting…`, progress: 1, installed: release.version };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    firmwareUpdate = { ...idleFirmwareUpdate(), error: `Firmware update failed: ${message} The board keeps its previous firmware unless writing had started; you can retry, or use npm run firmware:upload.` };
-    throw new Error(firmwareUpdate.error!);
-  } finally {
-    // Give Windows a moment to re-enumerate the restarted board, then reconnect automatically.
-    autoConnectDeclined = null; autoConnectRetryAt = Date.now() + 2500;
-    broadcast();
+    const failure = `Firmware update failed: ${message}${error instanceof FirmwareFlashError && error.writeStarted ? ' Writing had started; an incomplete image needs another firmware update, not just a reset.' : ''}`;
+    if (firmwareRecovery) { firmwareRecovery.failure = failure; firmwareRecovery.expectedVersion = null; }
+    else { firmwareUpdate = { ...idleFirmwareUpdate(), error: failure }; broadcast(); return; }
   }
+  await finishFirmwareRecovery();
 }
 
 function registerIpc() {
   handle('get', () => state(), false);
-  handle('firmware-update', () => serialize(async () => { await updateFirmware(); return state(); }));
+  handle('firmware-update', () => {
+    if (firmwareOperationPending) throw new Error('A firmware operation is already running.');
+    firmwareOperationPending = true;
+    return serialize(async () => { await updateFirmware(); return state(); }).finally(() => { firmwareOperationPending = false; });
+  });
+  handle('firmware-recover', () => {
+    if (firmwareOperationPending) throw new Error('A firmware operation is already running.');
+    firmwareOperationPending = true;
+    return serialize(async () => {
+      if (headlessTest) throw new Error('Board recovery is disabled in automated tests.');
+      requireSavedTuning();
+      if (!firmwareRecovery) throw new Error('There is no pending board recovery.');
+      await command('board-disconnect', undefined, 8000);
+      await finishFirmwareRecovery(); return state();
+    }).finally(() => { firmwareOperationPending = false; });
+  });
   handle('board-ports', () => listBoardPorts());
   handle('board-connect', (_event, value) => serialize(async () => {
     requireSavedTuning();
@@ -390,6 +434,7 @@ else {
     const suspendForUi = () => { if (worker) void command('suspend', mainWindow.isFocused() || hud.isFocused()).catch(console.error); };
     mainWindow.on('focus', suspendForUi); mainWindow.on('blur', suspendForUi);
     hud.on('focus', suspendForUi); hud.on('blur', suspendForUi);
+    mainWindow.on('close', event => { if (firmwareOperationPending) event.preventDefault(); });
     mainWindow.on('closed', () => app.quit());
     hud.on('close', event => { if (!quitting) { event.preventDefault(); hud.hide(); settings.hud.visible = false; broadcast(); } });
     let moveTimer: ReturnType<typeof setTimeout>;
@@ -410,6 +455,7 @@ else {
     if (!headlessTest) setInterval(() => void autoConnect().catch(console.error), 2000);
   }).catch(error => { console.error(error); app.exit(1); });
   app.on('before-quit', event => {
+    if (firmwareOperationPending) { event.preventDefault(); return; }
     if (quitting) return;
     event.preventDefault(); quitting = true;
     globalShortcut.unregisterAll();
