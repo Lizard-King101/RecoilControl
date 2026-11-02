@@ -1,0 +1,18 @@
+{
+  "version": "0.7.0",
+  "chip": "ESP32-C3",
+  "images": [
+    {
+      "file": "boot_app0.bin",
+      "address": 57344,
+      "size": 8192,
+      "sha256": "f94c5d786a7a8fab06ac5d10e33bf37711a6697636dc037559ea19cc410a17f0"
+    },
+    {
+      "file": "firmware.bin",
+      "address": 65536,
+      "size": 562000,
+      "sha256": "38c6e9d4bb026eddc8f6621a4f59e9bf692ec2c9ff221ee9158c178ee12404a8"
+    }
+  ]
+}

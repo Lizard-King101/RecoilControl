@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">
+  <title>Recoil Control</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="titlebar"><span class="brand-word">RECOIL<span>/</span>CONTROL</span></div>
+  <header class="appbar">
+    <div class="game-picker"><span class="game-mark">R</span><select id="game-select" aria-label="Game collection"></select><button id="new-game" class="icon-button" data-action="new-game" title="Add game collection" aria-label="Add game collection">+</button></div>
+    <nav class="main-nav" aria-label="Main navigation">
+      <button class="nav-item active" data-view="arsenal">Loadout <span class="nav-count" id="weapon-count">6</span></button>
+      <button class="nav-item" data-view="input">Setup</button>
+      <button class="nav-item" data-view="controls">Controls</button>
+      <button class="nav-item" data-view="hud">HUD</button>
+    </nav>
+    <div class="appbar-status">
+      <button class="link-status" data-action="retry" title="Reconnect input"><span id="connection-dot" class="dot"></span><span><strong id="connection-label">Connecting input…</strong><small id="connection-detail">Checking your devices</small></span></button>
+      <button class="button subtle" data-action="hud-mode">HUD mode</button>
+      <button id="enable-toggle" class="arm-toggle" role="switch" aria-checked="false" aria-label="Enable recoil control" data-action="toggle"><span id="engine-label">Standby</span><kbd id="toggle-key">F7</kbd></button>
+    </div>
+  </header>
+  <div id="notice" role="status" class="notice" hidden></div>
+  <main id="content"></main>
+  <footer class="statusbar"><span><span class="dot orange"></span><span id="footer-weapon">Assault Rifle</span></span><div id="footer-keys"></div><span id="footer-setup">800 DPI</span></footer>
+  <div id="toast" role="status" class="toast" hidden></div>
+  <dialog id="dialog"></dialog>
+  <script src="pattern-tools.js"></script><script src="pattern-editor.js"></script><script src="controls.js"></script><script src="app.js"></script>
+</body>
+</html>

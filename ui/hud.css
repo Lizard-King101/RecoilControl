@@ -1,0 +1,46 @@
+:root{color-scheme:dark;--bg:#101113;--panel:#17191c;--raised:#1f2226;--border:#2a2e33;--border-strong:#3a3f45;--text:#edebe6;--muted:#9aa0a6;--accent:#ff7a3d;--accent-hi:#ff9d6e;--accent-ink:#1a0e07;--warn:#f2c14e;--danger:#ff7b72;--display:"Bahnschrift Condensed","Bahnschrift","Arial Narrow",sans-serif;font-family:"Segoe UI Variable Text","Segoe UI",sans-serif}
+*{box-sizing:border-box}
+body{margin:0;background:transparent;color:var(--text);user-select:none}
+[hidden]{display:none!important}
+.hud-shell{height:100vh;border:1px solid var(--border);border-radius:10px;background:var(--bg);overflow:hidden;display:flex;flex-direction:column;-webkit-app-region:drag}
+.hud-shell.active{border-color:var(--accent)}
+.hud-shell.paused{border-color:#5a4a1e}
+.hud-shell.error{border-color:#5a2a28}
+.hud-main{height:102px;flex-shrink:0;padding:12px 12px 10px 14px;display:flex;flex-direction:column;justify-content:space-between}
+.hud-top{display:flex;align-items:center;gap:10px;min-width:0}
+.hud-abbr{font-family:var(--display);font-stretch:condensed;font-size:34px;font-weight:700;line-height:.85;letter-spacing:.02em;min-width:34px}
+.active .hud-abbr{color:var(--accent)}
+.error .hud-abbr{color:var(--muted)}
+.hud-title{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
+.hud-name{font-size:15px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.hud-game{font-family:var(--display);font-stretch:condensed;font-size:11px;font-weight:600;letter-spacing:.14em;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.state{display:flex;align-items:center;gap:5px;font-family:var(--display);font-stretch:condensed;font-size:12px;font-weight:700;letter-spacing:.1em;padding:4px 7px;border:1px solid var(--muted);border-radius:4px;color:var(--muted);white-space:nowrap}
+.state i{width:6px;height:6px;border-radius:50%;background:currentColor}
+.active .state{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+.paused .state{border-color:var(--warn);color:var(--warn)}
+.error .state{border-color:var(--danger);color:var(--danger)}
+button{border:0;background:transparent;color:var(--muted);cursor:pointer;-webkit-app-region:no-drag;font:inherit}
+#open-settings{width:26px;height:26px;border-radius:5px;display:grid;place-items:center;padding:0}
+#open-settings:hover{background:var(--raised);color:var(--text)}
+.hud-bottom{display:flex;align-items:center;gap:9px;font-size:12px;min-width:0}
+.stance-bar{display:grid;grid-template-columns:repeat(4,18px);gap:3px;flex-shrink:0}
+.stance-bar span{height:4px;border-radius:2px;background:var(--border)}
+.stance-bar span.on{background:var(--muted)}
+.active .stance-bar span.on{background:var(--accent)}
+.paused .stance-bar span.on{background:var(--warn)}
+#hud-profile{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+.hud-meta{margin-left:auto;display:flex;gap:10px;color:var(--muted);font-size:11px;white-space:nowrap}
+.shortcut{color:var(--text)}
+#hud-controls{height:38px;flex-shrink:0;display:flex;gap:6px;align-items:center;padding:0 12px 10px 14px;-webkit-app-region:no-drag}
+#hud-controls select{min-width:0;flex:1;height:28px;background:var(--raised);color:var(--text);border:1px solid var(--border-strong);border-radius:4px;font:12px "Segoe UI",sans-serif;padding:2px 4px;-webkit-app-region:no-drag}
+#hud-controls button{height:28px;min-width:30px;padding:0 7px;background:var(--raised);border:1px solid var(--border-strong);border-radius:4px;font-size:16px;color:var(--text)}
+#hud-controls #hud-toggle{font-family:var(--display);font-stretch:condensed;font-size:13px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+#hud-controls #hud-toggle.on{background:var(--raised);border-color:var(--border-strong);color:var(--text)}
+#hud-tuning{height:48px;flex-shrink:0;border-top:1px solid var(--border);background:var(--panel);padding:6px 12px 6px 14px;display:flex;flex-direction:column;justify-content:center;gap:1px}
+#hud-tuning span{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tuning-target-label{font-family:var(--display);font-stretch:condensed;font-size:12px;font-weight:700;letter-spacing:.1em;color:var(--accent-hi)}
+.tuning-values{font-family:var(--display);font-stretch:condensed;font-size:18px;font-weight:700}
+.tuning-values.limit{color:var(--danger)}
+button:disabled,select:disabled{opacity:.4;cursor:default}
+.hud-shell.recording{border-color:var(--danger)}
+.recording .state{background:var(--danger);border-color:var(--danger);color:#2a0b08}

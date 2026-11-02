@@ -1,37 +1,41 @@
 {
-  "name": "APIBoilerPlate",
-  "version": "1.0.0",
-  "description": "",
-  "main": "build/index.js",
-  "scripts": {
-    "test": "",
-    "serve": "nodemon",
-    "build": "rimraf ./build && tsc"
-  },
-  "author": "",
+  "name": "anti-recoil",
+  "version": "0.3.0",
+  "private": true,
+  "description": "Windows recoil-control prototype with a testable input engine",
+  "main": "build/desktop/main.js",
   "license": "ISC",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "firmware:build": "pio run --project-dir firmware && node scripts/firmware-release.cjs",
+    "firmware:upload": "pio run --project-dir firmware --target upload",
+    "board:check": "node scripts/board-check.cjs",
+    "test:board-worker": "npm run build && electron tests/board-worker-smoke.cjs",
+    "test:board-profile": "npm run build && node tests/board-profile-smoke.cjs",
+    "build": "tsc",
+    "prestart": "npm run build",
+    "start": "electron .",
+    "cli": "npm run build && node build/index.js",
+    "serve": "npm run build && electron .",
+    "serve:cli": "tsx watch src/index.ts",
+    "doctor": "npm run build && node build/index.js --doctor",
+    "demo": "npm run build && node build/index.js --demo",
+    "test": "npm run build && node --test tests/*.test.cjs",
+    "test:desktop": "npm run build && electron tests/desktop-smoke.cjs",
+    "typecheck": "tsc --noEmit"
+  },
   "dependencies": {
-    "@ensdomains/ensjs": "^3.0.0-alpha.30",
-    "@types/node": "^14.14.35",
-    "axios": "^0.21.1",
-    "electron": "^20.2.0",
-    "ethers": "^5.7.2",
-    "fs-extra": "^10.0.0",
-    "idna-uts46-hx": "^4.0.4",
-    "nanotimer": "^0.3.15",
-    "node-cron": "^3.0.0",
-    "node-interception": "^2.0.4",
-    "node-notifier": "^10.0.1",
-    "uiohook-napi": "^1.5.0"
+    "esptool-js": "0.7.0",
+    "node-interception": "2.0.4",
+    "serialport": "13.0.0",
+    "uiohook-napi": "1.5.5"
   },
   "devDependencies": {
-    "@types/cors": "^2.8.10",
-    "@types/fs-extra": "^9.0.13",
-    "@types/nanotimer": "^0.3.0",
-    "@types/node-notifier": "^8.0.2",
-    "nodemon": "^2.0.7",
-    "rimraf": "^3.0.2",
-    "ts-node": "^10.9.1",
-    "typescript": "^4.2.3"
+    "@types/node": "24.19.2",
+    "electron": "45.2.1",
+    "tsx": "4.23.15",
+    "typescript": "5.9.3"
   }
 }
