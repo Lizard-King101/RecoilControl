@@ -2,11 +2,73 @@
 
 Return to the [project README](../README.md) for setup and default shortcuts.
 
+## Attachment setups
+
+Each weapon starts with **Base**, its original pattern without attachments. In
+**Loadout → Attachment setup → Add setup**, name a combination, copy Base or another
+setup (or start blank), and add attachment rows. Slot and attachment names are free
+text with suggestions from this game's saved setups; use Optic, Muzzle, or any
+custom slot your game needs. Each setup allows one attachment per slot, up to 12
+slots; each weapon supports up to 24 additional setups. No JSON editing is needed.
+
+Select a setup above the Pattern/Tune tabs. **Edit pattern**, strength, live stance
+tuning, recording, and calibration all apply to that setup alone. Copies preserve
+the source pattern, strength, and sensitivity reference, but require testing again.
+They are independent snapshots: later Base edits do not change copies. Attachment
+names do not apply automatic game-specific multipliers. Adjust strength under
+**Tune**, or edit individual shots, RPM, and stances in the workshop.
+
+**Edit** renames a setup or changes its attachment list. Changing those labels
+leaves its pattern intact. Delete asks for confirmation and returns to Base.
+**Duplicate** copies the entire weapon and all its setups; **Add weapon → Copy**
+uses the source weapon's selected setup as the new Base pattern.
+
+The selected setup is remembered per weapon across switches and restarts. The HUD
+shows its name and, while unlocked, offers a setup selector. HUD switches use the
+same pause-and-release-fire behavior as weapon switches; releasing a hold-to-enable
+binding still stops compensation. Switching in configuration leaves output off.
+Save or discard live tuning before changing setups. Empty selected setups produce
+no compensation and are skipped by previous/next weapon shortcuts.
+
+Exports bundle Base and every attachment setup, including their custom stance
+definitions. Import creates a new editable weapon without installing anyone else's
+shortcuts or local calibration records. This provides portable files for sharing;
+the Community tab also supports local game-pack publishing, previews, and file sharing. See [Community library](community-library.md) for the local service and hosting plan. Online publishing is not enabled yet.
+
+## Stances per game
+
+Choose Crouch and optionally Prone when creating a game collection. Under
+**Controls → Stances**, add, rename, or remove named postures and assign a key with
+**Hold** or **Toggle** behavior. Click a binding to record a key, middle mouse, or
+side button; Escape cancels, and Save applies it. Standing/default and right-mouse ADS are built in.
+Rust starts with Crouch only; Prone is opt-in. You can also define a custom posture,
+such as Mounted, without editing JSON. Each game supports up to 16 postures.
+
+Save the game's stances, then open **Edit pattern → + Stances**. Pick a stance and
+a pattern to copy. The copy is independent: change its strength, edit shots, or use
+the existing after-burst fixes. ADS variants are separate optional patterns; there
+is no need to author every combination. **Add all missing stances** copies the
+default pattern for the remaining combinations. Rename or remove the current
+pattern in the same panel; Undo restores removals. The default fallback cannot be
+removed. Remove a posture's patterns from all its weapons and attachment setups before removing that posture
+from the game.
+
+Only one posture is selected at a time. The most recently pressed posture key wins;
+releasing a hold restores a still-held posture or standing. A toggle ends when
+pressed again, another posture is chosen, or Escape is pressed. Toggled posture is
+preserved across weapon switches, but cleared on game or stance-binding changes.
+It is not saved across launches. Typing in configuration does not toggle posture.
+Match the game's own key and behavior; the app does not detect posture automatically.
+
+Pattern selection prefers posture + ADS, then the posture's hip-fire pattern,
+then standing ADS, then default. Unassigned posture keys still allow editing and
+previewing. Previewing a stance never changes live input or moves the mouse.
+
 ![Pattern workshop with draggable shot positions and after-burst adjustments](images/pattern-workshop.png)
 
 ## Live stance tuning
 
-Set your DPI, game sensitivity, and ADS multiplier under **Setup → Mouse &
+Set your DPI, game sensitivity, and ADS multiplier under **Settings → Mouse &
 sensitivity** first. In **Loadout → Tune**, **Output strength** scales all stances;
 **Apply strength** saves those global values. **Save calibration** records the
 setup you tested while preserving the current output. Calibrated profiles scale
@@ -97,7 +159,7 @@ guide conversion, not automatic screen capture or game-recoil recording.
 **Add weapon → Create & edit pattern** opens the workshop with a blank pattern or a
 copy of a configured weapon. Blank patterns start with zero movement and a generic
 600 RPM that you should replace. Copies keep tuning and calibration but clear the
-direct shortcut. The weapon list also supports **Duplicate** for separate variants.
+direct shortcut. The weapon list also supports **Duplicate** to copy a complete weapon and all its setups.
 LR-300 and Custom SMG remain available as empty slots for authoring your own patterns.
 
 New and edited patterns use raw **counts per shot**. RPM changes timing without
@@ -108,7 +170,53 @@ stance strength is already included in the shot counts. Cancelling the editor
 leaves the saved pattern untouched. Each shot keeps the existing velocity easing.
 The workshop preview includes stance
 strength, before global weapon strength and sensitivity scaling. Counts-format
-exports use `recoil-control/weapon-v2`; imports accept both v1 and v2.
+exports now use `recoil-control/weapon-v4`; imports still accept v1, v2, and v3.
+
+## Portable profile format
+
+Weapon v4 exports include the used stance definitions as `{ id, name }` records
+beside the weapon. Pattern activation contains at most one of those stable posture
+IDs plus optional `aiming`. Display names can change without changing activation;
+the UI creates IDs for custom stances. Pattern counts, timing, tuning, and activation
+are validated on import, including unique posture IDs and activation combinations.
+
+Imports add an editable local weapon copy and any missing stance definitions. They
+preserve existing patterns and local controls, clear the imported weapon shortcut
+and calibration, and leave new posture keys unassigned. Assign those keys under
+Controls. Existing stance IDs retain the local name; different IDs with the same
+display name receive a numbered label. Unsupported future versions are rejected
+instead of being partially imported. Older app versions cannot read v4 exports.
+
+Local settings migrate from v1/v2 to v3 on save and keep the existing backup behavior.
+Legacy files get the original Crouch definition when missing; existing weapon
+patterns become Base without changing their output. The weapon's root pattern,
+tuning, provenance, and calibration describe Base. `setups` contains independent
+records with `id`, `name`, `attachments: [{ slot, name }]`, and those same pattern
+fields. `selectedSetupId` chooses `base` or a setup ID. Unknown settings versions,
+duplicate setup IDs/names, duplicate attachment slots, and invalid references are
+rejected. Local settings and imported files are capped at 20 million characters;
+saving checks the same limit as loading before replacing the previous file.
 
 These tools help measure and tune local profiles; they do not supply verified
 current Rust recoil patterns. The bundled AK values are a legacy starting point.
+
+## Delete games and weapons
+
+Use **Delete game** in the Loadout heading to remove the selected game collection,
+including its weapons, attachment setups, controls, and input settings. Use
+**Delete weapon** in the Pattern tab to remove the selected weapon and all its
+attachment variants. Both show a confirmation naming the target and affected
+content. Cancel is initially focused; changes made to that target while the dialog
+is open require a fresh confirmation.
+
+Deleting the active item selects its next neighbor, or the previous neighbor at
+the end of the list. Other collections remain unchanged. The last weapon can be
+deleted while retaining the game's settings, and the last game can be deleted
+without creating a replacement. Empty loadouts offer Add weapon / Import weapon;
+an empty app offers Add game / Browse community. The HUD and compensation remain
+inactive with no weapon selected. Empty collections persist across restarts.
+
+Deletion permanently removes the local item and disables compensation. Save or
+discard a live tuning draft before deleting. Published community-library packs
+and previously exported files are separate copies and are preserved. To remove
+a published pack as well, use **Remove local listing** in Community.

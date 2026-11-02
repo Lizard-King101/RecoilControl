@@ -19,7 +19,7 @@ let drawnOverlay = 'null';
 const chart = { width: 600, height: 420, fitX: 520, fitY: 360 };
 
 function editPattern() {
-  const saved = current().weapon;
+  const saved = weaponView(current().weapon);
   editDraft = structuredClone(saved);
   patternConverted = !!editDraft.profile && editDraft.profile.units !== 'counts';
   editDraft.profile = editDraft.profile ? patternTools.toCounts(editDraft.profile)
@@ -124,7 +124,7 @@ function recordingParts() {
 }
 function recordingLive() {
   const recording = state.runtime.recording;
-  if (!recording?.supported) return `<p class="wb-record-note">Recording needs the ESP32 relay with firmware 0.5.0 or later. Connect it under <strong>Setup › Board &amp; Bluetooth</strong>, or flash the new firmware first.</p>`;
+  if (!recording?.supported) return `<p class="wb-record-note">Recording needs the ESP32 relay with firmware 0.5.0 or later. Connect it under <strong>Settings › Board &amp; Bluetooth</strong>, or flash the new firmware first.</p>`;
   if (!recording.available && !recording.active) return `<p class="wb-record-note">Waiting for the relay. Make sure the Cobra and Windows Bluetooth links are both connected.</p>`;
   const parts = recordingParts();
   return ['status', 'notice', 'takes', 'controls'].map(name => `<div data-part="${name}">${parts[name]}</div>`).join('')
@@ -176,6 +176,18 @@ function applyRecording() {
 function patternRows(recoil) {
   return recoil.vectors.map((pair, i) => `<tr data-shot-row="${i}" class="${i === selectedShot ? 'selected-shot' : ''}"><td><button type="button" class="text-button" data-action="select-shot" data-row="${i}" aria-label="Select shot ${i + 1}">${i + 1}</button></td>${pair.map((value, axis) => `<td><input class="shot-count" data-shot="${i}" data-axis="${axis}" aria-label="Shot ${i + 1} ${axis ? 'vertical' : 'horizontal'} counts" type="number" step="any" min="-1000" max="1000" value="${value}" required></td>`).join('')}<td><button type="button" class="text-button" data-action="duplicate-shot" data-row="${i}" aria-label="Duplicate shot ${i + 1}">＋</button><button type="button" class="text-button" data-action="remove-shot" data-row="${i}" aria-label="Remove shot ${i + 1}">×</button></td></tr>`).join('');
 }
+function gameStanceChoices() {
+  const postures = current().game.stances;
+  return [{ name: 'Default', activate: [] }, ...postures.map(s => ({ name: s.name, activate: [s.id] })),
+    { name: 'ADS', activate: ['aiming'] }, ...postures.map(s => ({ name: `${s.name} ADS`, activate: [s.id, 'aiming'] }))];
+}
+function missingStances() {
+  return gameStanceChoices().filter(choice => !editDraft.profile.recoils.some(r => [...r.activate].sort().join(',') === [...choice.activate].sort().join(',')));
+}
+function stanceTools(profile, recoil) {
+  const missing = missingStances();
+  return `<details id="stance-tools" class="pattern-generator"><summary>Add or edit stances</summary><div class="field"><label for="stance-name">Current stance name</label><input id="stance-name" value="${escape(recoil.name)}" maxlength="80" required></div><p class="hint">${recoil.activate.length ? `Used for ${escape(gameStanceChoices().find(c => [...c.activate].sort().join(',') === [...recoil.activate].sort().join(','))?.name ?? recoil.name)}.` : 'The default is also the fallback for missing stance patterns.'}</p><button type="button" class="text-button" data-action="remove-stance" ${recoil.activate.length ? '' : 'disabled'}>Remove this stance</button><div class="rule"></div>${missing.length ? `<div class="field"><label for="new-pattern-stance">Add a stance</label><select id="new-pattern-stance">${missing.map((item, i) => `<option value="${i}">${escape(item.name)}</option>`).join('')}</select></div><div class="field"><label for="stance-source">Start by copying</label><select id="stance-source">${profile.recoils.map((item, i) => `<option value="${i}" ${i === editIndex ? 'selected' : ''}>${escape(item.name)}</option>`).join('')}</select></div><div class="action-row"><button type="button" class="button subtle small" data-action="add-stance">Add stance</button><button type="button" class="text-button" data-action="add-stances">Add all missing stances</button></div><p class="hint">Copies are independent. Adjust strength or fix a test burst, then save. Undo restores removed stances.</p>` : '<p>All stances for this game have patterns.</p>'}<p class="hint">Add Prone or a custom posture for this game under Controls. Only the stances you choose appear here.</p></details>`;
+}
 function patternDialog() {
   const profile = editDraft.profile;
   const recoil = profile.recoils[editIndex];
@@ -185,21 +197,22 @@ function patternDialog() {
   const fixes = [['high', 'Went high', 'Pull down more'], ['low', 'Went low', 'Pull down less'], ['left', 'Drifted left', 'Push right'], ['right', 'Drifted right', 'Push left']];
   $('#dialog').className = 'workbench-dialog';
   $('#dialog').innerHTML = `<form id="modal-form" class="workbench" data-submit="pattern">
-    <header class="wb-head"><button type="button" class="wb-back" data-action="close-dialog">‹ Loadout</button><span class="weapon-abbr">${escape(abbreviation(editDraft))}</span><label class="wb-name"><span class="kicker">Pattern</span><input id="pattern-name" value="${escape(editDraft.name)}" maxlength="80" required aria-label="Weapon name"></label>
+    <header class="wb-head"><button type="button" class="wb-back" data-action="close-dialog">‹ Loadout</button><span class="weapon-abbr">${escape(abbreviation(editDraft))}</span><label class="wb-name"><span class="kicker">${escape(setupName(current().weapon))} · Pattern</span><input id="pattern-name" value="${escape(editDraft.name)}" maxlength="80" required aria-label="Weapon name"></label>
       <div class="wb-head-actions"><span id="wb-dirty" class="wb-dirty" ${patternDirty ? '' : 'hidden'}>Unsaved changes</span><button type="button" class="button subtle" data-action="pattern-undo" ${patternUndo.length ? '' : 'disabled'}>Undo</button><button type="submit" class="button">Save pattern</button></div></header>
     <div id="dialog-error" class="dialog-error wb-error" role="alert"></div>
     <div class="wb-body">
       <section class="wb-main" aria-label="Pattern canvas">
-        <div class="wb-stances"><span class="kicker">Stance</span>${profile.recoils.map((item, i) => `<button type="button" class="stance-tab ${i === editIndex ? 'active' : ''}" data-action="edit-stance" data-row="${i}" aria-pressed="${i === editIndex}">${escape(item.name)}</button>`).join('')}<button type="button" class="text-button" data-action="add-stances" ${profile.recoils.length === 4 ? 'disabled' : ''}>+ Add missing stances</button><span class="wb-legend"><i class="draft"></i>Draft <i class="ghost"></i>Saved</span></div>
+        <div class="wb-stances"><span class="kicker">Stance</span>${profile.recoils.map((item, i) => `<button type="button" class="stance-tab ${i === editIndex ? 'active' : ''}" data-action="edit-stance" data-row="${i}" aria-pressed="${i === editIndex}">${escape(item.name)}</button>`).join('')}<button type="button" class="text-button" data-action="manage-stances">+ Stances</button><span class="wb-legend"><i class="draft"></i>Draft <i class="ghost"></i>Saved</span></div>
         <div class="wb-canvas"><svg id="draft-chart" viewBox="0 0 ${chart.width} ${chart.height}" role="group" aria-label="Editable shot positions"></svg><span class="wb-axis">origin (0,0) · X → right · Y ↓ down · counts · preview never moves the mouse</span></div>
         <div class="wb-timeline"><div class="wb-timeline-head"><button type="button" class="button subtle small" data-action="play-draft">▷ Preview</button><span class="kicker">Shots · click to select, Shift+click for a range</span><strong id="wb-range-label" class="wb-range">${rangeLabel()}</strong><button type="button" class="text-button" data-action="range-all">Select all</button></div><div id="wb-timeline" class="wb-bars" role="group" aria-label="Shot timeline"></div><p id="draft-summary" class="hint">Updating preview…</p></div>
       </section>
       <aside class="wb-inspector">
-        <section class="wb-section wb-record"><div class="card-kicker">Record a pull · ${escape(recoil.name)}</div><p>Start recording, switch to a practice range, and fire full magazines at a wall while pulling the mouse to stay on target. Only bursts fired while the game has focus are recorded, so clicks in this window never count. Use the stance you are editing${recoil.activate.includes('aiming') ? ', with ADS held' : ''}${recoil.activate.includes('crouching') ? ', crouched' : ''}.</p><div class="field"><label for="record-shots">Shots per magazine</label><input id="record-shots" type="number" min="1" max="120" step="1" value="${recordShots}"><small>Fire rate comes from the Pattern section (${profile.rpm} RPM). Shots after the magazine runs dry are ignored.</small></div><div id="wb-record-live">${recordingLive()}</div></section>
+        ${stanceTools(profile, recoil)}
+        <section class="wb-section wb-record"><div class="card-kicker">Record a pull · ${escape(recoil.name)}</div><p>Start recording, switch to a practice range, and fire full magazines at a wall while pulling the mouse to stay on target. Only bursts fired while the game has focus are recorded, so clicks in this window never count. Use <strong>${escape(recoil.name)}</strong>${recoil.activate.includes('aiming') ? ', with ADS held' : ''}. The recording cannot detect your posture.</p><div class="field"><label for="record-shots">Shots per magazine</label><input id="record-shots" type="number" min="1" max="120" step="1" value="${recordShots}"><small>Fire rate comes from the Pattern section (${profile.rpm} RPM). Shots after the magazine runs dry are ignored.</small></div><div id="wb-record-live">${recordingLive()}</div></section>
         <section class="wb-section"><div class="card-kicker">Fix after a test burst</div><p>Fire a burst, then tell the pattern what happened to <strong id="wb-fix-range">${rangeLabel().toLowerCase()}</strong>.</p><div class="wb-fixes">${fixes.map(([id, label, detail]) => `<button type="button" class="wb-fix" data-action="fix-pattern" data-fix="${id}"><strong>${label}</strong><small>${detail}</small></button>`).join('')}</div><div class="field wb-step"><label for="fix-step">Fix size</label><select id="fix-step">${[[0.05, 'Small · 5%'], [0.1, 'Medium · 10%'], [0.2, 'Large · 20%']].map(([value, label]) => `<option value="${value}" ${value === fixStep ? 'selected' : ''}>${label}</option>`).join('')}</select></div><p id="wb-last-fix" class="hint" ${lastFix ? '' : 'hidden'}>${escape(lastFix)}</p></section>
         <section class="wb-section selected-point"><strong id="selected-shot-label"></strong><div class="field-row"><div class="field"><label for="shot-position-x">Position X</label><input id="shot-position-x" type="number" step="any"></div><div class="field"><label for="shot-position-y">Position Y</label><input id="shot-position-y" type="number" step="any"></div></div><button class="button subtle small" type="button" data-action="apply-shot-position">Set shot position</button><p class="hint">Drag a point on the canvas, or type its position. Other shots stay where they are. Counts from the origin, including stance strength.</p></section>
         <section class="wb-section"><div class="card-kicker">Pattern</div><div class="field-row"><div class="field"><label for="pattern-rpm">Fire rate · RPM</label><input id="pattern-rpm" type="number" min="30" max="2000" value="${profile.rpm}" required></div><div class="field"><label for="repeat-mode">After the last shot</label><select id="repeat-mode"><option value="end" ${profile.mode === 'end' ? 'selected' : ''}>Repeat last</option><option value="start" ${profile.mode === 'start' ? 'selected' : ''}>Use first</option><option value="loop" ${profile.mode === 'loop' ? 'selected' : ''}>Loop pattern</option></select></div></div><div class="field"><label>Stance multiplier · horizontal / vertical</label><div class="field-row"><input id="multiplier-x" aria-label="Horizontal multiplier on shot counts" type="number" min="0" max="2" step="any" value="${recoil.multipliers[0]}" required><input id="multiplier-y" aria-label="Vertical multiplier on shot counts" type="number" min="0" max="2" step="any" value="${recoil.multipliers[1]}" required></div></div><p id="pattern-strength-explanation" class="hint">${patternConverted ? '<strong>Your saved tuning is included.</strong> The existing stance strength has been folded into the shot counts. ' : ''}The multiplier scales those counts: <strong>1 × 1 uses them as entered</strong>.</p></section>
-        <details class="pattern-generator"><summary>Shot table · ${recoil.vectors.length} shots</summary><div class="workshop-toolbar"><button type="button" class="text-button" data-action="pattern-view">${patternView === 'table' ? 'Paste / edit pairs' : 'Shot table'}</button></div>
+        <details id="shot-tools" class="pattern-generator"><summary>Shot table · ${recoil.vectors.length} shots</summary><div class="workshop-toolbar"><button type="button" class="text-button" data-action="pattern-view">${patternView === 'table' ? 'Paste / edit pairs' : 'Shot table'}</button></div>
         ${patternView === 'table' ? `<div class="shot-scroll"><table class="shot-table"><thead><tr><th>Shot</th><th>X · counts</th><th>Y · counts</th><th>Edit</th></tr></thead><tbody>${patternRows(recoil)}</tbody></table></div><button type="button" class="text-button" data-action="add-shot">+ Add shot</button>` : `<div class="field"><label for="vectors">One X, Y pair per line</label><textarea id="vectors" spellcheck="false" required>${recoil.vectors.map(pair => pair.join(', ')).join('\n')}</textarea><small>1–120 pairs. Counts from −1000 to 1000.</small></div>`}</details>
         <details class="pattern-generator"><summary>Reshape a range by percentage</summary><p>Scale movement in a range. Use a negative percentage to mirror an axis.</p><div class="field-row"><div class="field"><label for="shape-from">From shot</label><input id="shape-from" type="number" min="1" max="${recoil.vectors.length}" value="${patternRange.from + 1}"></div><div class="field"><label for="shape-to">Through shot</label><input id="shape-to" type="number" min="1" max="${recoil.vectors.length}" value="${patternRange.to + 1}"></div></div><div class="field-row"><div class="field"><label for="shape-x">Horizontal %</label><input id="shape-x" type="number" step="any" min="-500" max="500" value="100"></div><div class="field"><label for="shape-y">Vertical %</label><input id="shape-y" type="number" step="any" min="-500" max="500" value="100"></div></div><button class="button subtle" type="button" data-action="shape-pattern">Apply to range</button></details>
         <details class="pattern-generator"><summary>Build from shot positions / a recoil guide</summary><p>Enter one position per shot relative to a (0, 0) origin, in firing order. X is right and Y is down. Use positions from a guide or repeated unassisted sprays as a starting estimate; scale still needs in-game tuning.</p><div class="field"><label for="position-pairs">Shot positions · X, Y per line</label><textarea id="position-pairs" placeholder="0, -10&#10;2, -22&#10;5, -35"></textarea></div><div class="field-row"><div class="field"><label for="position-kind">These positions show</label><select id="position-kind"><option value="recoil">Game recoil (invert both axes)</option><option value="output">Desired compensation</option></select></div><div class="field"><label for="position-scale">Counts per reference unit</label><input id="position-scale" type="number" step="any" min="0.001" max="1000" value="1"></div></div><button class="button subtle" type="button" data-action="import-positions">Convert to this stance</button><p class="hint">Replaces this stance and sets its multiplier to 1 × 1. Undo restores it. Screen pixels are not mouse counts.</p></details>
@@ -221,6 +234,7 @@ function capturePattern(validate = true) {
   editDraft.profile.name = editDraft.name;
   editDraft.profile.rpm = Number($('#pattern-rpm').value);
   editDraft.profile.mode = $('#repeat-mode').value;
+  editDraft.profile.recoils[editIndex].name = $('#stance-name').value.trim();
   editDraft.profile.recoils[editIndex].multipliers = [Number($('#multiplier-x').value), Number($('#multiplier-y').value)];
   editDraft.profile.recoils[editIndex].vectors = vectors;
 }
@@ -255,7 +269,7 @@ function drawTimeline(recoil) {
 function drawDraft(fixedTransform) {
   const recoil = editDraft.profile.recoils[editIndex];
   const positions = [[0, 0], ...patternTools.positions(recoil.vectors, recoil.multipliers)];
-  const saved = patternGhost?.recoils.find(item => item.name === recoil.name);
+  const saved = patternGhost?.recoils.find(item => [...item.activate].sort().join(',') === [...recoil.activate].sort().join(','));
   const ghost = saved ? [[0, 0], ...patternTools.positions(saved.vectors, saved.multipliers)] : [];
   const overlay = recordingOverlay();
   drawnOverlay = JSON.stringify(overlay);
@@ -369,7 +383,8 @@ function patternAction(action, row, options = {}) {
     patternRange = { from: 0, to: editDraft.profile.recoils[editIndex].vectors.length - 1 };
     patternDialog(); return;
   }
-  if (action === 'pattern-view') { patternView = patternView === 'table' ? 'text' : 'table'; patternDialog(); $('#dialog details').open = true; return; }
+  if (action === 'manage-stances') { $('#stance-tools').open = true; $('#stance-tools').scrollIntoView({ block: 'nearest' }); return; }
+  if (action === 'pattern-view') { patternView = patternView === 'table' ? 'text' : 'table'; patternDialog(); $('#shot-tools').open = true; return; }
   patternCheckpoint();
   const recoil = editDraft.profile.recoils[editIndex];
   const before = recoil.vectors.length;
@@ -396,14 +411,24 @@ function patternAction(action, row, options = {}) {
     const source = editDraft.profile.recoils[Number($('#copy-from').value)];
     recoil.vectors = structuredClone(source.vectors); recoil.multipliers = [...source.multipliers];
   }
-  if (action === 'add-stances') {
-    const base = editDraft.profile.recoils.find(item => !item.activate.length);
-    for (const [name, activate] of [['Crouch', ['crouching']], ['ADS', ['aiming']], ['Crouch ADS', ['crouching', 'aiming']]]) {
-      if (!editDraft.profile.recoils.some(item => [...item.activate].sort().join(',') === [...activate].sort().join(','))) editDraft.profile.recoils.push({ ...structuredClone(base), name, activate });
+  if (action === 'add-stances' || action === 'add-stance') {
+    const missing = missingStances();
+    const choices = action === 'add-stances' ? missing : [missing[Number($('#new-pattern-stance').value)]];
+    const base = action === 'add-stances' ? editDraft.profile.recoils.find(item => !item.activate.length) : editDraft.profile.recoils[Number($('#stance-source').value)];
+    for (const choice of choices) {
+      if (!choice || !base) throw new Error('Choose a stance and starting pattern.');
+      editDraft.profile.recoils.push({ ...structuredClone(base), ...choice });
     }
+    if (action === 'add-stance') editIndex = editDraft.profile.recoils.length - 1;
+  }
+  if (action === 'remove-stance') {
+    if (!recoil.activate.length) throw new Error('Keep the default fallback pattern.');
+    editDraft.profile.recoils.splice(editIndex, 1);
+    editIndex = editDraft.profile.recoils.findIndex(item => !item.activate.length);
   }
   // Replacing the whole stance resets the range; other edits keep it.
   if (['import-positions', 'generate-pattern', 'copy-stance'].includes(action) || recoil.vectors.length !== before && patternRange.to === before - 1 && patternRange.from === 0) patternRange = { from: 0, to: recoil.vectors.length - 1 };
+  if (['add-stance', 'remove-stance'].includes(action)) { selectedShot = 0; patternRange = { from: 0, to: editDraft.profile.recoils[editIndex].vectors.length - 1 }; }
   const keepOpen = [...document.querySelectorAll('#dialog details')].map(item => item.open);
   patternDialog();
   document.querySelectorAll('#dialog details').forEach((item, i) => { item.open = !!keepOpen[i]; });

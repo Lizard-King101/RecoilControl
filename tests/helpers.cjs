@@ -5,7 +5,7 @@ const mouseStroke = (state = 0, extra = {}) => ({
   type: 'mouse', state, flags: 0, x: 0, y: 0, rolling: 0, information: 0, ...extra,
 });
 
-function fixture({ mice = 1 } = {}) {
+function fixture({ mice = 1, profile } = {}) {
   const contexts = [];
   const errors = [];
   const messages = [];
@@ -58,6 +58,7 @@ function fixture({ mice = 1 } = {}) {
     every(callback) { timers.add(callback); return () => timers.delete(callback); },
   };
   const app = new AntiRecoil(backend, {
+    ...(profile ? { engine: new (require('../build/recoil-engine').RecoilEngine)(profile) } : {}),
     clock, onStatus: message => messages.push(message), onError: error => errors.push(error),
   });
   const device = (id = 11) => ({

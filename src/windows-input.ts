@@ -1,11 +1,23 @@
-import { InputBackend, Key, MouseContext } from './input';
+import { InputBackend, InputDevice, Key, MouseContext } from './input';
+
+// The subset of node-interception 2.0.4 used by this adapter. Its package is
+// skipped on other platforms, so compiling must not require its declarations.
+interface InterceptionModule {
+  Interception: new () => {
+    getMice(): InputDevice[];
+    setFilter(type: 'mouse', filter: number): void;
+    wait(timeout: number): Promise<InputDevice | null>;
+    destroy(): void;
+  };
+  FilterMouseState: { ALL: number; NONE: number };
+}
 
 export function loadWindowsBackend(): InputBackend {
   if (process.platform !== 'win32' || !['x64', 'ia32'].includes(process.arch)) {
     throw new Error('Live input requires x64 or x86 Windows. Use --demo to run the engine without input devices.');
   }
   // Load native addons only in live/diagnostic mode; the engine and demo are portable.
-  const { Interception, FilterMouseState }: typeof import('node-interception') = require('node-interception');
+  const { Interception, FilterMouseState }: InterceptionModule = require('node-interception');
   const { uIOhook, UiohookKey }: typeof import('uiohook-napi') = require('uiohook-napi');
   const keys = new Map<number, Key>([
     [UiohookKey.Enter, 'enter'], [UiohookKey.NumpadAdd, 'plus'], [UiohookKey.Escape, 'escape'],

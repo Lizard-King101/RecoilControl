@@ -48,7 +48,7 @@ const board = new BoardConnection({ onChange: () => {
 
 // Recording only listens to the relay. Compensation stays off for the whole session.
 async function startRecording() {
-  if (!relayMode || !relayProfiles) throw new Error('Recording a pull needs the ESP32 relay. Connect it under Setup › Board & Bluetooth.');
+  if (!relayMode || !relayProfiles) throw new Error('Recording a pull needs the ESP32 relay. Connect it under Settings › Board & Bluetooth.');
   if (!board.supportsTrace) throw new Error('Update the board firmware to 0.5.0 or later to record a pull.');
   if (!board.relayReady) throw new Error('Wait for the Cobra and Windows Bluetooth links before recording.');
   if (measurement?.state.running) throw new Error('Finish the DPI measurement before recording.');
@@ -149,16 +149,22 @@ function tuneDown(key: Key) { if (key === 'escape') stopEpoch++; tuning?.keyDown
 
 function gameAction(action: GameAction) {
   if (action === 'disable') { stopEpoch++; tuning?.setActive(false); publish(); return; }
+  // Release always wins, including during a weapon switch or pending enable.
+  if (typeof action === 'object' && 'compensation' in action && !action.compensation) {
+    stopEpoch++; void controller?.setEnabled(false).then(publish).catch(value => { error = String(value); publish(); });
+    publish(); return;
+  }
   if (measurement?.state.running || switching) return;
   if (action === 'tuningToggle' || action === 'tuningTarget') {
     const key = action === 'tuningToggle' ? 'f8' : 'f9';
     tuning?.keyDown(key, suspended); tuning?.keyUp(key); publish(); return;
   }
-  if (action === 'toggle') {
+  if (action === 'toggle' || typeof action === 'object' && 'compensation' in action) {
     stopEpoch++;
     if (recorder.active) { error = 'Stop recording before enabling compensation.'; publish(); return; }
     if (!controller) { error = 'Configure this weapon before enabling compensation.'; publish(); return; }
-    void controller.setEnabled(!controller.enabled).then(() => { error = null; publish(); }).catch(value => { error = String(value); publish(); }); return;
+    const enabled = typeof action === 'object' ? action.compensation : !controller.enabled;
+    void controller.setEnabled(enabled).then(() => { error = null; publish(); }).catch(value => { error = String(value); publish(); }); return;
   }
   const resume = controller?.enabled ?? false;
   if (tuning?.state.dirty) { error = 'Save or discard the live tuning draft in the Loadout Tune tab before changing weapons.'; publish(); return; }
@@ -210,11 +216,13 @@ port.on('message', event => {
           if (!config || !['interception', 'bluetooth'].includes(config.output)) throw new Error('Invalid output configuration.');
           if (config.tuningLimits && (config.tuningLimits.length !== config.profile?.recoils.length || config.tuningLimits.some(pair => !Array.isArray(pair) || pair.length !== 2 || pair.some(v => !Number.isFinite(v) || v < 1 || v > 3)))) throw new Error('Invalid tuning limits.');
           tuningLimits = config.tuningLimits;
+          if (gameId !== (config.gameId ?? '')) { controls?.cancelActivation(); controls?.resetStances(); }
+          if (!config.resume) controls?.cancelActivation();
           bindings = validateBindings(config.bindings); weaponKeys = config.weapons ?? []; gameId = config.gameId ?? '';
           const resumeEpoch = config.resumeEpoch ?? stopEpoch;
           await configure(config.profile, config.output);
           switching = false;
-          if (config.resume && resumeEpoch === stopEpoch && controller && ready && !recorder.active) await controller.setEnabled(true);
+          if (config.resume && resumeEpoch === stopEpoch && controller && ready && !recorder.active && (bindings.activationMode !== 'hold' || controls?.activationHeld)) await controller.setEnabled(true);
           break;
         }
         case 'tuning': {
@@ -230,10 +238,12 @@ port.on('message', event => {
         }
         case 'suspend':
           suspended = message.value === true;
+          if (suspended) controls?.cancelActivation();
           controller?.setSuspended(suspended);
           break;
         case 'enabled':
-          if (message.value === false) stopEpoch++;
+          if (message.value === false) { stopEpoch++; controls?.cancelActivation(); }
+          if (message.value === true && bindings.activationMode === 'hold') throw new Error('Hold your assigned compensation key or mouse button to enable.');
           if (relayMode && !relayProfiles && message.value === true) throw new Error('Recoil is disabled while testing mouse passthrough.');
           if (relayMode && !relayProfiles && message.value === false) break;
           if (typeof message.value !== 'boolean') throw new Error('Invalid enabled state.');

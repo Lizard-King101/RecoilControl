@@ -66,11 +66,12 @@ async function until(check, message) {
   await until(async () => (await snapshot()).settings.games[0].input.dpi === 1200, 'Input settings did not save');
   assert.equal((await snapshot()).settings.games[0].input.sensitivity, 0.5);
   await until(async () => (await snapshot()).runtime.ready || (await snapshot()).runtime.error, 'Input reconfiguration did not finish');
+  await run(`document.querySelector('[data-view="board"]').click();`);
   if ((await snapshot()).runtime.ready) {
     await until(async () => await run('document.querySelector("#diagnostic-output")?.textContent === "0 / 0"'), 'Live diagnostics did not reach the renderer');
     assert.equal((await snapshot()).runtime.diagnostics.movementsAccepted, 0);
   }
-  await run('document.querySelector("#diagnostic-state").scrollIntoView({ block: "center" }); document.querySelector("#toast").hidden = true;');
+  await run(`document.querySelector('[data-view="board"]').click(); document.querySelector("#diagnostic-state").scrollIntoView({ block: "center" }); document.querySelector("#toast").hidden = true;`);
   await delay(50);
   fs.writeFileSync(path.join(root, 'artifacts/input-diagnostics.png'), (await main.webContents.capturePage()).toPNG());
 
@@ -133,7 +134,7 @@ async function until(check, message) {
   await run(`document.dispatchEvent(new KeyboardEvent('keydown',{key:'r',code:'KeyR',altKey:true,bubbles:true}));`);
   await until(async () => await run('document.querySelector("#toast").textContent.includes("recovery is disabled in automated tests")'), 'Keyboard recovery did not reach the guarded IPC');
   await run('window.control.getState().then(receive)');
-  await run(`document.querySelector('#output-device').value = 'bluetooth'; document.querySelector('#output-device').dispatchEvent(new Event('change', { bubbles: true }));`);
+  await run(`document.querySelector('[data-view="board"]').click(); document.querySelector('#output-device').value = 'bluetooth'; document.querySelector('#output-device').dispatchEvent(new Event('change', { bubbles: true }));`);
   await until(async () => (await snapshot()).settings.output === 'bluetooth' && (await snapshot()).runtime.output === 'bluetooth', 'Bluetooth selection did not reach the worker');
   assert.equal((await snapshot()).runtime.enabled, false);
   assert.equal((await snapshot()).runtime.ready, false);
@@ -175,7 +176,7 @@ async function until(check, message) {
   await run(`document.querySelector('[data-view="controls"]').click(); document.querySelector('#binding-toggle-key').value='f5'; document.querySelector('#controls-form').requestSubmit();`);
   await until(async () => await run('document.querySelector("#toast").textContent.includes("different shortcut")'), 'Duplicate bindings were accepted');
   assert.equal((await snapshot()).settings.games[1].bindings.toggle, 'f7');
-  await run(`document.querySelector('#binding-toggle-key').value='num0'; document.querySelector('#binding-tuningToggle-key').value='num8'; document.querySelector('#weapon-key-0-mods').value='alt'; document.querySelector('#weapon-key-0-key').value='num1'; document.querySelector('#controls-form').requestSubmit();`);
+  await run(`document.querySelector('#binding-toggle-key').value='num0'; document.querySelector('#binding-tuningToggle-key').value='num8'; document.querySelector('#weapon-key-0-key').value='alt+num1'; document.querySelector('#controls-form').requestSubmit();`);
   await until(async () => (await snapshot()).settings.games[1].bindings.toggle === 'num0', 'Per-game controls did not save');
   assert.equal((await snapshot()).settings.games[0].bindings.toggle, 'f7');
   assert.equal((await snapshot()).settings.games[1].weapons[0].hotkey, 'alt+num1');

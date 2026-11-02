@@ -1,12 +1,15 @@
 const api = window.control;
 const abbreviations = { ak: 'AK', lr300: 'LR', mp5: 'MP5', thompson: 'TH', 'custom-smg': 'SMG', m249: '249' };
+function activeSetup(w) { return !w.selectedSetupId || w.selectedSetupId === 'base' ? w : w.setups.find(s => s.id === w.selectedSetupId); }
 let latest;
 let feedback = '';
 let busy = false;
 function update(state) {
   latest = state;
-  const game = state.settings.games.find(game => game.id === state.settings.selectedGameId);
-  const weapon = game.weapons.find(weapon => weapon.id === game.selectedWeaponId);
+  const game = state.settings.games.find(game => game.id === state.settings.selectedGameId) ?? state.emptySelection.game;
+  const weapon = game.weapons.find(weapon => weapon.id === game.selectedWeaponId) ?? state.emptySelection.weapon;
+  const setup = activeSetup(weapon);
+  const setupName = setup === weapon ? 'Base' : setup.name;
   const runtime = state.runtime;
   const tuning = runtime.tuning;
   const current = tuning?.stances[tuning.current];
@@ -25,13 +28,15 @@ function update(state) {
   document.getElementById('hud-weapon').textContent = weapon.name;
   document.getElementById('hud-abbr').textContent = abbreviations[weapon.id] ?? weapon.name.slice(0, 3).toUpperCase();
   document.getElementById('hud-profile').textContent = runtime.stance;
-  const stances = (weapon.profile?.recoils ?? []).slice(0, 4).map(recoil => recoil.name);
+  document.getElementById('hud-weapon').title = `${weapon.name} · ${setupName}`;
+  document.getElementById('hud-setup-label').textContent = setupName;
+  const stances = (setup.profile?.recoils ?? []).slice(0, 4).map(recoil => recoil.name);
   document.getElementById('hud-stances').replaceChildren(...[0, 1, 2, 3].map(index => {
     const segment = document.createElement('span');
     if (index < stances.length && stances[index] === runtime.stance) segment.className = 'on';
     return segment;
   }));
-  document.getElementById('hud-dpi').textContent = `${game.input.dpi} DPI`;
+
   document.getElementById('hud-state').textContent = runtime.measurement.running ? 'MEASURING' : !runtime.ready ? 'OFFLINE' : runtime.enabled ? runtime.paused ? 'PAUSED' : 'ARMED' : 'STANDBY';
   if (runtime.relay && !runtime.passthrough) {
     document.getElementById('hud-game').textContent = `${game.name.toUpperCase()} · RELAY`;
@@ -41,7 +46,7 @@ function update(state) {
   if (runtime.passthrough) {
     document.getElementById('hud-game').textContent = 'MOUSE RELAY · BLE';
     document.getElementById('hud-weapon').textContent = 'Cobra Pro';
-    document.getElementById('hud-dpi').textContent = 'Recoil off';
+    document.getElementById('hud-setup-label').textContent = 'Recoil off';
   }
   if (runtime.passthrough) {
     document.getElementById('hud-abbr').textContent = '—';
@@ -54,17 +59,26 @@ function update(state) {
   document.getElementById('open-settings').hidden = state.settings.hud.locked;
   document.getElementById('hud-controls').hidden = state.settings.hud.locked;
   const select = document.getElementById('hud-select');
-  const signature = JSON.stringify(game.weapons.map(w => [w.id, w.name, !!w.profile]));
+  const signature = JSON.stringify(game.weapons.map(w => [w.id, w.name, !!activeSetup(w).profile]));
   if (select.dataset.signature !== signature) {
-    select.replaceChildren(...game.weapons.map(w => { const option = document.createElement('option'); option.value = w.id; option.textContent = w.name + (w.profile ? '' : ' · empty'); return option; }));
+    select.replaceChildren(...game.weapons.map(w => { const option = document.createElement('option'); option.value = w.id; option.textContent = w.name + (activeSetup(w).profile ? '' : ' · empty'); return option; }));
     select.dataset.signature = signature;
   }
-  select.value = weapon.id; select.disabled = busy;
-  for (const id of ['previous-weapon', 'next-weapon']) document.getElementById(id).disabled = busy || !game.weapons.some(w => w.profile);
+  select.value = weapon.id; select.disabled = busy || !game.weapons.length;
+  for (const id of ['previous-weapon', 'next-weapon']) document.getElementById(id).disabled = busy || !game.weapons.some(w => activeSetup(w).profile);
+  const setups = document.getElementById('hud-setup-select');
+  const choices = [{ id: 'base', name: 'Base' }, ...weapon.setups];
+  const setupSignature = JSON.stringify(choices.map(s => [s.id, s.name]));
+  document.getElementById('hud-setup-controls').hidden = state.settings.hud.locked || !weapon.setups.length;
+  if (setups.dataset.signature !== setupSignature) {
+    setups.replaceChildren(...choices.map(s => { const option = document.createElement('option'); option.value = s.id; option.textContent = s.name; return option; }));
+    setups.dataset.signature = setupSignature;
+  }
+  setups.value = weapon.selectedSetupId; setups.disabled = busy;
   const toggle = document.getElementById('hud-toggle');
-  toggle.textContent = runtime.enabled ? 'Off' : 'Arm';
+  toggle.textContent = runtime.enabled ? 'Off' : game.bindings.activationMode === 'hold' ? 'Hold binding' : 'Arm';
   toggle.classList.toggle('on', runtime.enabled);
-  toggle.disabled = busy || !runtime.ready || !weapon.profile || runtime.passthrough || runtime.measurement.running;
+  toggle.disabled = (game.bindings.activationMode === 'hold' && !runtime.enabled) || busy || !runtime.ready || !setup.profile || runtime.passthrough || runtime.measurement.running;
   const problem = feedback || (runtime.error?.includes('tuning draft') ? runtime.error : '');
   document.getElementById('hud-profile').title = problem;
   if (problem) document.getElementById('hud-profile').textContent = problem.includes('tuning draft') ? 'Save tuning first · ⚙' : 'Action failed · ⚙';
@@ -83,3 +97,5 @@ document.getElementById('previous-weapon').addEventListener('click', () => hudAc
 document.getElementById('next-weapon').addEventListener('click', () => hudAction(() => api.selectWeapon({ direction: 1 })));
 document.getElementById('hud-select').addEventListener('change', event => { const id = event.target.value; void hudAction(() => api.selectWeapon({ id })); });
 document.getElementById('hud-toggle').addEventListener('click', () => { const enabled = !latest.runtime.enabled; void hudAction(() => api.setEnabled(enabled)); });
+
+document.getElementById('hud-setup-select').addEventListener('change', event => { const setupId = event.target.value; void hudAction(() => api.selectWeapon({ setupId })); });

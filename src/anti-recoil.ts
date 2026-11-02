@@ -1,5 +1,4 @@
-import type { MouseState } from 'node-interception';
-import { Clock, InputBackend, InputDevice, inspectBackend, Key, missingDriverMessage, MouseContext, systemClock } from './input';
+import { Clock, InputBackend, InputDevice, inspectBackend, Key, missingDriverMessage, MouseContext, postureFromKeys, systemClock } from './input';
 import { RecoilEngine } from './recoil-engine';
 
 interface Session {
@@ -176,7 +175,7 @@ export class AntiRecoil {
       if (mouse && (x !== 0 || y !== 0)) {
         // The binding's enum omits zero, although zero is the native movement-only state.
         this.counters.movementAttempts++;
-        if (!mouse.send({ type: 'mouse', flags: 0, state: 0 as MouseState, x, y, rolling: 0, information: 0 })) {
+        if (!mouse.send({ type: 'mouse', flags: 0, state: 0, x, y, rolling: 0, information: 0 })) {
           throw new Error('Unable to send mouse movement.');
         }
         // Acceptance by the driver does not establish consumption by a game.
@@ -194,6 +193,7 @@ export class AntiRecoil {
       shooting: this.shootingMice.size > 0,
       aiming: this.aimingMice.size > 0,
       crouching: this.keys.has('control') || this.keys.has('controlRight'),
+      posture: postureFromKeys(this.keys),
       paused: this.suspended || this.keys.has('shift') || this.keys.has('shiftRight'),
     });
   }

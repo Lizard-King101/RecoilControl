@@ -1,5 +1,5 @@
 import { ButtonInput } from './button-input';
-import { Clock, Key, systemClock } from './input';
+import { Clock, Key, postureFromKeys, systemClock } from './input';
 import { RecoilEngine } from './recoil-engine';
 
 export interface ProfileOutput {
@@ -71,7 +71,7 @@ export class BluetoothController {
   private cancelBurst() { this.epoch++; this.engine.reset(); this.lastTick = this.clock.now(); }
   private updateInput() {
     this.engine.setInput({ shooting: this.active && this.left && !this.releaseRequired, aiming: this.right,
-      crouching: this.keys.has('control') || this.keys.has('controlRight'), paused: this.paused });
+      crouching: this.keys.has('control') || this.keys.has('controlRight'), posture: postureFromKeys(this.keys), paused: this.paused });
   }
   private fail(error: unknown) {
     this.active = false; this.cancelBurst();

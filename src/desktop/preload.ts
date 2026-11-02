@@ -2,6 +2,17 @@ import { contextBridge, ipcRenderer } from 'electron';
 
 // Only named operations cross the renderer boundary; never expose ipcRenderer itself.
 contextBridge.exposeInMainWorld('control', {
+  deleteGame: (request: unknown) => ipcRenderer.invoke('control:delete-game', request),
+  deleteWeapon: (request: unknown) => ipcRenderer.invoke('control:delete-weapon', request),
+  libraryList: () => ipcRenderer.invoke('control:library-list'),
+  libraryDetail: (id: string) => ipcRenderer.invoke('control:library-detail', id),
+  libraryDraft: (metadata: unknown) => ipcRenderer.invoke('control:library-draft', metadata),
+  libraryPublish: (pack: unknown) => ipcRenderer.invoke('control:library-publish', pack),
+  libraryInstall: (id: string) => ipcRenderer.invoke('control:library-install', id),
+  libraryRemove: (id: string) => ipcRenderer.invoke('control:library-remove', id),
+  libraryExport: (id: string) => ipcRenderer.invoke('control:library-export', id),
+  libraryOpenFile: () => ipcRenderer.invoke('control:library-open-file'),
+  openVisionLab: () => ipcRenderer.invoke('control:vision-open'),
   getState: () => ipcRenderer.invoke('control:get'),
   boardPorts: () => ipcRenderer.invoke('control:board-ports'),
   connectBoard: (path: string) => ipcRenderer.invoke('control:board-connect', path),
@@ -15,7 +26,7 @@ contextBridge.exposeInMainWorld('control', {
   testBoardMovement: () => ipcRenderer.invoke('control:board-test'),
   openBluetooth: () => ipcRenderer.invoke('control:board-bluetooth'),
   save: (settings: unknown) => ipcRenderer.invoke('control:save', settings),
-  selectWeapon: (request: { id?: string; direction?: number }) => ipcRenderer.invoke('control:weapon-select', request),
+  selectWeapon: (request: { id?: string; direction?: number; setupId?: string }) => ipcRenderer.invoke('control:weapon-select', request),
   setEnabled: (enabled: boolean) => ipcRenderer.invoke('control:enabled', enabled),
   retry: () => ipcRenderer.invoke('control:retry'),
   showMain: () => ipcRenderer.invoke('control:show'),

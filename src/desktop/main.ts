@@ -1,8 +1,10 @@
 import { app, BrowserWindow, dialog, globalShortcut, ipcMain, IpcMainInvokeEvent, screen, shell, utilityProcess, UtilityProcess } from 'electron';
-import { readFileSync, writeFileSync } from 'node:fs';
+import { readFileSync, statSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { applyLiveTuning, effectiveProfile, selected, selectWeapon, SettingsStore, tuningLimits, validateSettings, validateWeapon, validateProfile } from './settings';
+import { activeSetup, applyLiveTuning, bindingsForGame, effectiveProfile, emptySelection, selected, selectWeapon, SettingsStore, tuningLimits, validateSettings, validateProfile } from './settings';
+import { deleteCollection } from './collection-actions';
+import { exportWeapon, importWeapon } from './profile-sharing';
 import { RecoilEngine } from '../recoil-engine';
 import type { AntiRecoil } from '../anti-recoil';
 import { idleBoardState, listBoardPorts } from './board';
@@ -10,7 +12,12 @@ import { flashFirmware, FirmwareFlashError, idleFirmwareUpdate, loadRelease, res
 import { FirmwarePort, recoverFirmware } from './firmware-recovery';
 import { idleTuning } from '../live-tuning';
 import { idleRecording } from '../pull-recording';
+import { createVisionLab } from './vision-lab';
+import { applyVisionVectors } from './vision-settings';
 import { defaultBindings, keyChoices } from '../key-bindings';
+import { createGamePack, installGamePack, maxPackageBytes, validateGamePack } from '../community/package';
+import { FilePackRepository, PackRecord } from '../community/repository';
+import { libraryRequest, startLibraryService } from '../community/service';
 
 app.setName('Recoil Control');
 app.setAppUserModelId('local.recoil.control');
@@ -22,7 +29,13 @@ if (headlessTest) app.disableHardwareAcceleration();
 if (testData) app.setPath('userData', resolve(testData));
 const store = new SettingsStore(join(app.getPath('userData'), 'settings.json'));
 let settings = store.load();
+let libraryService: ReturnType<typeof startLibraryService> | undefined;
+function library() {
+  libraryService ??= startLibraryService(new FilePackRepository(join(app.getPath('userData'), 'community-library'))).catch(error => { libraryService = undefined; throw error; });
+  return libraryService;
+}
 let mainWindow: BrowserWindow;
+let visionLab: ReturnType<typeof createVisionLab> | undefined;
 let hud: BrowserWindow;
 let worker: UtilityProcess | undefined;
 let quitting = false;
@@ -48,11 +61,15 @@ try { bundledFirmware = loadRelease(firmwareDirectory)?.version ?? null; } catch
 let firmwareUpdate = idleFirmwareUpdate();
 let firmwareOperationPending = false;
 let firmwareRecovery: { target: FirmwarePort; expectedVersion: string | null; requireRelay: boolean; failure: string | null } | null = null;
-function state() { return { settings, runtime, board: boardState, firmware: { bundled: bundledFirmware, update: firmwareUpdate }, warning: store.warning, shortcutReady, version: app.getVersion(), keyChoices, defaultBindings: defaultBindings() }; }
+function state() { return { settings, emptySelection: emptySelection(), runtime, board: boardState, firmware: { bundled: bundledFirmware, update: firmwareUpdate }, warning: store.warning, shortcutReady, version: app.getVersion(), keyChoices, defaultBindings: defaultBindings() }; }
 function broadcast() {
   if (hud && !hud.isDestroyed()) {
-    const height = 104 + (settings.hud.locked ? 0 : 38) + (runtime.tuning.active || runtime.tuning.dirty ? 48 : 0);
-    if (hud.getSize()[1] !== height) { hud.setSize(316, height); placeHud(); }
+    const height = 104 + (settings.hud.locked ? 0 : 38 + (selected(settings).weapon.setups.length ? 36 : 0)) + (runtime.tuning.active || runtime.tuning.dirty ? 48 : 0);
+    if (hud.getSize()[1] !== height) {
+      // Keep native fixed-size constraints in sync when rows appear or disappear.
+      hud.setMinimumSize(316, height); hud.setMaximumSize(316, height);
+      hud.setSize(316, height); placeHud();
+    }
   }
   for (const window of [mainWindow, hud]) {
     if (window && !window.isDestroyed()) window.webContents.send('control:state', state());
@@ -105,13 +122,14 @@ function startWorker() {
 }
 
 function configuration() { const { game } = selected(settings); return { profile: effectiveProfile(settings), output: settings.output, tuningLimits: tuningLimits(settings),
-  bindings: game.bindings, weapons: game.weapons.map(({ id, hotkey }) => ({ id, hotkey })), gameId: game.id }; }
+  bindings: bindingsForGame(game), weapons: game.weapons.map(({ id, hotkey }) => ({ id, hotkey })), gameId: game.id }; }
 function requireSavedTuning() {
   if (runtime.tuning.dirty) throw new Error('Save or discard the live tuning draft in the Loadout Tune tab before changing profiles or reconnecting.');
 }
 
 async function switchWeapon(request: unknown, resume = runtime.enabled, resumeEpoch = runtime.stopEpoch) {
   requireSavedTuning();
+  visionLab?.stop();
   if (!request || typeof request !== 'object') throw new Error('Choose a weapon.');
   const next = selectWeapon(settings, request);
   // Always configure: a hotkey has already stopped the old output, even if a
@@ -166,6 +184,7 @@ function serialize<T>(task: () => Promise<T>): Promise<T> {
 async function save(value: unknown, commitTuning = false) {
   if (!commitTuning) requireSavedTuning();
   const next = validateSettings(value);
+  visionLab?.stop();
   // HUD placement is managed by its own window, not by a potentially stale form.
   next.hud = settings.hud;
   if (runtime.enabled) await command('enabled', false);
@@ -261,6 +280,31 @@ async function updateFirmware() {
 }
 
 function registerIpc() {
+  handle('delete-game', (_event, request) => serialize(() => save(deleteCollection(settings, 'game', request))));
+  handle('delete-weapon', (_event, request) => serialize(() => save(deleteCollection(settings, 'weapon', request))));
+  handle('library-list', async () => libraryRequest(await library(), '/v1/packs'));
+  handle('library-detail', async (_event, id) => libraryRequest(await library(), `/v1/packs/${id}`));
+  handle('library-draft', (_event, metadata) => { requireSavedTuning(); return createGamePack(settings, metadata); });
+  handle('library-publish', async (_event, value) => libraryRequest(await library(), '/v1/packs', 'POST', validateGamePack(value)));
+  handle('library-remove', async (_event, id) => libraryRequest(await library(), `/v1/packs/${id}`, 'DELETE'));
+  handle('library-install', (_event, id) => serialize(async () => {
+    requireSavedTuning();
+    const record = await libraryRequest<PackRecord>(await library(), `/v1/packs/${id}`);
+    return save(installGamePack(settings, record.pack));
+  }));
+  handle('library-export', async (_event, id) => {
+    const record = await libraryRequest<PackRecord>(await library(), `/v1/packs/${id}`);
+    const result = await dialog.showSaveDialog(mainWindow, { title: 'Export game pack', defaultPath: `${record.pack.title.replace(/[^a-z0-9_-]/gi, '-')}.recoil.json`, filters: [{ name: 'Recoil game pack', extensions: ['json'] }] });
+    if (!result.canceled && result.filePath) writeFileSync(result.filePath, JSON.stringify(record.pack, null, 2), 'utf8');
+    return !result.canceled;
+  });
+  handle('library-open-file', async () => {
+    const result = await dialog.showOpenDialog(mainWindow, { title: 'Add a shared game pack to the library', filters: [{ name: 'Recoil game pack', extensions: ['json'] }], properties: ['openFile'] });
+    if (result.canceled || !result.filePaths[0]) return null;
+    if (statSync(result.filePaths[0]).size > maxPackageBytes) throw new Error('Game packs must be smaller than 2 MB.');
+    const data = readFileSync(result.filePaths[0]); if (data.length > maxPackageBytes) throw new Error('Game packs must be smaller than 2 MB.');
+    return libraryRequest(await library(), '/v1/packs', 'POST', validateGamePack(JSON.parse(data.toString('utf8'))));
+  });
   handle('get', () => state(), false);
   handle('firmware-update', () => {
     if (firmwareOperationPending) throw new Error('A firmware operation is already running.');
@@ -307,6 +351,7 @@ function registerIpc() {
     if (!worker) startWorker(); else await command('configure', configuration());
     return state();
   }));
+  handle('vision-open', async () => { requireSavedTuning(); await visionLab!.open(); });
   handle('show', () => { showMain(); }, false);
   handle('hud', (_event, value) => serialize(async () => {
     if (!value || typeof value !== 'object') throw new Error('Invalid HUD settings.');
@@ -323,12 +368,12 @@ function registerIpc() {
   handle('preview', (_event, value) => {
     const { game, weapon } = selected(settings);
     const request = typeof value === 'object' && value ? value as { stance: number; profile: unknown } : null;
-    const profile = request ? validateProfile(request.profile) : effectiveProfile(settings);
+    const profile = request ? validateProfile(request.profile, game.stances) : effectiveProfile(settings);
     value = request ? request.stance : value;
     if (!profile || typeof value !== 'number' || !Number.isInteger(value) || value < 0 || value >= profile.recoils.length) return null;
     const stance = profile.recoils[value];
     const engine = new RecoilEngine(profile);
-    engine.setInput({ shooting: true, paused: false, aiming: stance.activate.includes('aiming'), crouching: stance.activate.includes('crouching') });
+    engine.setInput({ shooting: true, paused: false, aiming: stance.activate.includes('aiming'), crouching: false, posture: stance.activate.find(condition => condition !== 'aiming') ?? null });
     const frames = Math.min(600, Math.ceil((60000 / profile.rpm) * stance.vectors.length / (1000 / 60)));
     let x = 0; let y = 0;
     const points = [{ x, y }];
@@ -367,7 +412,8 @@ function registerIpc() {
   }));
   handle('calibrate', (_event, value) => serialize(async () => {
     const next = structuredClone(settings);
-    const { game, weapon } = selected(next);
+    const { game, weapon: owner } = selected(next);
+    const weapon = activeSetup(owner);
     weapon.tuning = value as typeof weapon.tuning;
     const checked = validateSettings(next);
     const profile = effectiveProfile(checked);
@@ -390,25 +436,15 @@ function registerIpc() {
     const result = await dialog.showOpenDialog(mainWindow, { title: 'Import weapon profile', filters: [{ name: 'Recoil profile', extensions: ['json'] }], properties: ['openFile'] });
     if (result.canceled) return state();
     const data = readFileSync(result.filePaths[0], 'utf8');
-    if (data.length > 500000) throw new Error('Profile file is too large.');
-    const imported = JSON.parse(data);
-    if (!['recoil-control/weapon-v1', 'recoil-control/weapon-v2'].includes(imported.format)) throw new Error('This file is not a Recoil Control weapon export.');
-    const weapon = validateWeapon(imported.weapon);
-    weapon.id = randomUUID();
-    weapon.hotkey = null;
-    // Imported calibration is not a verified measurement of this setup.
-    weapon.provenance = weapon.profile ? 'manual' : 'template'; weapon.calibration = null;
-    const next = structuredClone(settings);
-    const { game } = selected(next);
-    game.weapons.push(weapon); game.selectedWeaponId = weapon.id;
-    return save(next);
+    if (data.length > 20_000_000) throw new Error('Profile file is too large.');
+    return save(importWeapon(settings, JSON.parse(data), randomUUID()));
   }));
   handle('export', async () => {
     requireSavedTuning();
     if (runtime.enabled) await command('enabled', false);
-    const { weapon } = selected(settings);
+    const { weapon, game } = selected(settings);
     const result = await dialog.showSaveDialog(mainWindow, { title: 'Export weapon profile', defaultPath: `${weapon.name.replace(/[^a-z0-9_-]/gi, '-')}.json`, filters: [{ name: 'Recoil profile', extensions: ['json'] }] });
-    if (!result.canceled && result.filePath) writeFileSync(result.filePath, JSON.stringify({ format: weapon.profile?.units === 'counts' ? 'recoil-control/weapon-v2' : 'recoil-control/weapon-v1', weapon }, null, 2), 'utf8');
+    if (!result.canceled && result.filePath) writeFileSync(result.filePath, JSON.stringify(exportWeapon(weapon, game.stances), null, 2), 'utf8');
     return !result.canceled;
   });
   handle('source', async (_event, value) => {
@@ -422,6 +458,11 @@ if (!app.requestSingleInstanceLock()) app.quit();
 else {
   app.on('second-instance', () => { if (mainWindow) showMain(); });
   void app.whenReady().then(async () => {
+    visionLab = createVisionLab(root, {
+      getSettings: () => settings, headless: headlessTest,
+      disable: async () => { requireSavedTuning(); if (runtime.enabled) await command('enabled', false); },
+      save: (key, stance, vectors, rpm) => serialize(async () => { await save(applyVisionVectors(settings, key, stance, vectors, rpm)); }),
+    });
     const preload = join(__dirname, 'preload.js');
     const webPreferences = { preload, contextIsolation: true, nodeIntegration: false, sandbox: true, offscreen: headlessTest };
     mainWindow = new BrowserWindow({ width: 1280, height: 850, minWidth: 1060, minHeight: 720,
@@ -455,8 +496,10 @@ else {
     if (!headlessTest) setInterval(() => void autoConnect().catch(console.error), 2000);
   }).catch(error => { console.error(error); app.exit(1); });
   app.on('before-quit', event => {
+    visionLab?.close();
     if (firmwareOperationPending) { event.preventDefault(); return; }
     if (quitting) return;
+    void libraryService?.then(service => service.close()).catch(() => {});
     event.preventDefault(); quitting = true;
     globalShortcut.unregisterAll();
     const timer = setTimeout(() => { worker?.kill(); app.exit(0); }, 2000);

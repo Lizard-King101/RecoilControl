@@ -2,20 +2,31 @@ import { copyFileSync, existsSync, mkdirSync, readFileSync, renameSync, writeFil
 import { dirname } from 'node:path';
 import { akProfile, WeaponProfile } from '../profiles';
 import type { TuningState } from '../live-tuning';
-import { defaultBindings, GameBindings, validateBindingConflicts, validateBindings, validateShortcut } from '../key-bindings';
+import { defaultBindings, GameBindings, stanceBindings, validateBindingConflicts, validateBindings, validateShortcut } from '../key-bindings';
+import { defaultStances, StanceDefinition, validateStances } from '../stances';
 
 export interface InputSetup { dpi: number; sensitivity: number; adsMultiplier: number }
-export interface WeaponSettings {
-  hotkey: string | null;
-  id: string;
-  name: string;
-  category: string;
+export interface PatternSetup {
   profile: WeaponProfile | null;
   tuning: { x: number; y: number };
   provenance: 'legacy' | 'template' | 'manual' | 'calibrated';
   calibration: (InputSetup & { at: string }) | null;
 }
+export interface AttachmentSetup extends PatternSetup {
+  id: string;
+  name: string;
+  attachments: { slot: string; name: string }[];
+}
+export interface WeaponSettings extends PatternSetup {
+  hotkey: string | null;
+  id: string;
+  name: string;
+  category: string;
+  selectedSetupId: string;
+  setups: AttachmentSetup[];
+}
 export interface GameSettings {
+  stances: StanceDefinition[];
   bindings: GameBindings;
   id: string;
   name: string;
@@ -24,7 +35,7 @@ export interface GameSettings {
   weapons: WeaponSettings[];
 }
 export interface Settings {
-  version: 1;
+  version: 3;
   output: 'interception' | 'bluetooth';
   selectedGameId: string;
   games: GameSettings[];
@@ -38,10 +49,10 @@ export function defaultSettings(): Settings {
     ['custom-smg', 'Custom SMG', 'SMG'], ['m249', 'M249', 'LMG'],
   ];
   return {
-    version: 1, output: 'interception', selectedGameId: 'rust',
-    games: [{ id: 'rust', name: 'Rust', bindings: defaultBindings(), input: { dpi: 800, sensitivity: 1, adsMultiplier: 1 }, selectedWeaponId: 'ak',
+    version: 3, output: 'interception', selectedGameId: 'rust',
+    games: [{ id: 'rust', name: 'Rust', stances: defaultStances(), bindings: defaultBindings(), input: { dpi: 800, sensitivity: 1, adsMultiplier: 1 }, selectedWeaponId: 'ak',
       weapons: catalog.map(([id, name, category]) => ({
-        id, name, category, hotkey: null, profile: id === 'ak' ? structuredClone(akProfile) : null,
+        id, name, category, hotkey: null, selectedSetupId: 'base', setups: [], profile: id === 'ak' ? structuredClone(akProfile) : null,
         tuning: { x: 1, y: 1 }, provenance: id === 'ak' ? 'legacy' : 'template', calibration: null,
       })),
     }],
@@ -82,18 +93,19 @@ function vector(value: unknown, max = 10): [number, number] {
   return [number(pair[0], 'Vector X', -max, max), number(pair[1], 'Vector Y', -max, max)];
 }
 
-export function validateProfile(value: unknown): WeaponProfile {
+export function validateProfile(value: unknown, stances: readonly StanceDefinition[] = defaultStances()): WeaponProfile {
   const profile = object(value);
   if (profile.units !== undefined && profile.units !== 'counts') throw new Error('Unknown pattern units.');
   const mode = text(profile.mode, 'repeat mode');
   if (mode !== 'loop' && mode !== 'start' && mode !== 'end') throw new Error('Invalid repeat mode.');
-  const recoils = list(profile.recoils, 'stances', 1, 4).map(value => {
+  const recoils = list(profile.recoils, 'stances', 1, 2 * (stances.length + 1)).map(value => {
     const recoil = object(value);
     const activate = list(recoil.activate, 'conditions', 0, 2).map(condition => {
-      if (condition !== 'aiming' && condition !== 'crouching') throw new Error('Unknown stance condition.');
+      if (typeof condition !== 'string' || condition !== 'aiming' && !stances.some(s => s.id === condition)) throw new Error('Unknown stance condition. Add it to this game’s stances first.');
       return condition;
     });
     if (new Set(activate).size !== activate.length) throw new Error('Duplicate stance condition.');
+    if (activate.filter(condition => condition !== 'aiming').length > 1) throw new Error('A pattern can use one posture, with or without ADS.');
     const multipliers = vector(recoil.multipliers);
     multipliers.forEach(value => number(value, 'Multiplier', 0, 2));
     return { name: text(recoil.name, 'stance name'), activate, multipliers,
@@ -105,7 +117,7 @@ export function validateProfile(value: unknown): WeaponProfile {
   return { name: text(profile.name, 'profile name'), rpm: number(profile.rpm, 'RPM', 30, 2000), mode, recoils, ...(profile.units === 'counts' ? { units: 'counts' as const } : {}) };
 }
 
-export function validateWeapon(value: unknown): WeaponSettings {
+function validatePatternSetup(value: unknown, stances: readonly StanceDefinition[]): PatternSetup {
   const weapon = object(value);
   const tuning = object(weapon.tuning);
   const provenance = weapon.provenance;
@@ -117,53 +129,97 @@ export function validateWeapon(value: unknown): WeaponSettings {
     if (!Number.isFinite(Date.parse(at))) throw new Error('Invalid calibration date.');
     calibration = { ...input(record), at };
   }
-  const profile = weapon.profile === null ? null : validateProfile(weapon.profile);
+  const profile = weapon.profile === null ? null : validateProfile(weapon.profile, stances);
   if (provenance === 'calibrated' && (!calibration || !profile)) throw new Error('Calibration requires a configured profile.');
   if ((provenance === 'template') !== (profile === null)) throw new Error('Template status does not match the profile.');
   return {
-    id: text(weapon.id, 'weapon ID'), name: text(weapon.name, 'weapon name'), category: text(weapon.category, 'category'),
-    hotkey: weapon.hotkey == null ? null : validateShortcut(weapon.hotkey),
     profile, calibration, provenance: provenance as WeaponSettings['provenance'],
     tuning: { x: number(tuning.x, 'Horizontal strength', 0.05, 5), y: number(tuning.y, 'Vertical strength', 0.05, 5) },
   };
 }
 
+export function validateWeapon(value: unknown, stances: readonly StanceDefinition[] = defaultStances()): WeaponSettings {
+  const weapon = object(value);
+  const setups = list(weapon.setups === undefined ? [] : weapon.setups, 'attachment setups (maximum 24)', 0, 24).map(value => {
+    const setup = object(value);
+    const id = text(setup.id, 'setup ID');
+    const name = text(setup.name, 'setup name');
+    if (id === 'base' || name.toLowerCase() === 'base') throw new Error('Base is reserved for the original setup.');
+    const attachments = list(setup.attachments, 'attachments (maximum 12)', 0, 12).map(value => {
+      const item = object(value);
+      return { slot: text(item.slot, 'attachment slot', 40), name: text(item.name, 'attachment name') };
+    });
+    if (new Set(attachments.map(a => a.slot.toLowerCase())).size !== attachments.length) throw new Error('Choose one attachment per slot.');
+    return { id, name, attachments, ...validatePatternSetup(setup, stances) };
+  });
+  if (new Set(setups.map(s => s.id)).size !== setups.length) throw new Error('Duplicate setup ID.');
+  if (new Set(setups.map(s => s.name.toLowerCase())).size !== setups.length) throw new Error('Give each setup a different name.');
+  const selectedSetupId = weapon.selectedSetupId === undefined ? 'base' : text(weapon.selectedSetupId, 'selected setup');
+  if (selectedSetupId !== 'base' && !setups.some(s => s.id === selectedSetupId)) throw new Error('Selected attachment setup is missing.');
+  return { id: text(weapon.id, 'weapon ID'), name: text(weapon.name, 'weapon name'), category: text(weapon.category, 'category'),
+    hotkey: weapon.hotkey == null ? null : validateShortcut(weapon.hotkey), selectedSetupId, setups, ...validatePatternSetup(weapon, stances) };
+}
+
+// The root pattern remains the Base setup, so existing profiles migrate without changing output.
+export function activeSetup(weapon: WeaponSettings): PatternSetup {
+  return weapon.selectedSetupId === 'base' || !weapon.selectedSetupId ? weapon : weapon.setups.find(s => s.id === weapon.selectedSetupId)!;
+}
+export function allSetups(weapon: WeaponSettings): PatternSetup[] { return [weapon, ...(weapon.setups ?? [])]; }
+
 export function validateSettings(value: unknown): Settings {
   const settings = object(value);
-  if (settings.version !== 1) throw new Error('Unsupported settings version.');
+  if (settings.version !== 1 && settings.version !== 2 && settings.version !== 3) throw new Error('Unsupported settings version.');
   const output = settings.output ?? 'interception';
   if (output !== 'interception' && output !== 'bluetooth') throw new Error('Unknown output device.');
-  const games = list(settings.games, 'game collections', 1, 20).map(value => {
+  const games = list(settings.games, 'game collections', 0, 20).map(value => {
     const game = object(value);
-    const weapons = list(game.weapons, 'weapons', 1, 100).map(validateWeapon);
+    const stances = validateStances(game.stances);
+    const weapons = list(game.weapons, 'weapons', 0, 100).map(value => validateWeapon(value, stances));
     const bindings = validateBindings(game.bindings);
+    if (bindings.stances?.some(binding => !stances.some(s => s.id === binding.id))) throw new Error('A stance key refers to a missing game stance.');
     validateBindingConflicts(bindings, weapons);
     if (new Set(weapons.map(weapon => weapon.id)).size !== weapons.length) throw new Error('Duplicate weapon ID.');
-    const selectedWeaponId = text(game.selectedWeaponId, 'selected weapon');
-    if (!weapons.some(weapon => weapon.id === selectedWeaponId)) throw new Error('Selected weapon is missing.');
-    return { id: text(game.id, 'game ID'), name: text(game.name, 'game name'), bindings, input: input(game.input), selectedWeaponId, weapons };
+    const selectedWeaponId = weapons.length ? text(game.selectedWeaponId, 'selected weapon') : '';
+    if (weapons.length && !weapons.some(weapon => weapon.id === selectedWeaponId)) throw new Error('Selected weapon is missing.');
+    return { id: text(game.id, 'game ID'), name: text(game.name, 'game name'), stances, bindings, input: input(game.input), selectedWeaponId, weapons };
   });
   if (new Set(games.map(game => game.id)).size !== games.length) throw new Error('Duplicate game ID.');
-  const selectedGameId = text(settings.selectedGameId, 'selected game');
-  if (!games.some(game => game.id === selectedGameId)) throw new Error('Selected game is missing.');
+  const selectedGameId = games.length ? text(settings.selectedGameId, 'selected game') : '';
+  if (games.length && !games.some(game => game.id === selectedGameId)) throw new Error('Selected game is missing.');
   const hud = object(settings.hud);
   return {
-    version: 1, output, selectedGameId, games,
+    version: 3, output, selectedGameId, games,
     hud: { visible: bool(hud.visible), locked: bool(hud.locked), opacity: number(hud.opacity, 'HUD opacity', 0.3, 1),
       x: hud.x === null ? null : number(hud.x, 'HUD X', -100000, 100000),
       y: hud.y === null ? null : number(hud.y, 'HUD Y', -100000, 100000) },
   };
 }
 
-export function selected(settings: Settings): { game: GameSettings; weapon: WeaponSettings } {
-  const game = settings.games.find(game => game.id === settings.selectedGameId)!;
-  return { game, weapon: game.weapons.find(weapon => weapon.id === game.selectedWeaponId)! };
+export function bindingsForGame(game: GameSettings): GameBindings {
+  return { ...game.bindings, stances: stanceBindings(game.bindings).filter(binding => game.stances.some(s => s.id === binding.id)) };
 }
 
-export function selectWeapon(settings: Settings, request: { id?: string; direction?: number }): Settings {
+// Display/input fallbacks only: these objects are never inserted into saved collections.
+export function emptySelection(): { game: GameSettings; weapon: WeaponSettings } {
+  return {
+    game: { id: '', name: 'No game selected', stances: [], bindings: { ...defaultBindings(), stances: [] }, input: { dpi: 800, sensitivity: 1, adsMultiplier: 1 }, selectedWeaponId: '', weapons: [] },
+    weapon: { id: '', name: 'No weapon selected', category: '', hotkey: null, selectedSetupId: 'base', setups: [], profile: null, tuning: { x: 1, y: 1 }, calibration: null, provenance: 'template' },
+  };
+}
+export function selected(settings: Settings): { game: GameSettings; weapon: WeaponSettings } {
+  const empty = emptySelection(), game = settings.games.find(game => game.id === settings.selectedGameId) ?? empty.game;
+  return { game, weapon: game.weapons.find(weapon => weapon.id === game.selectedWeaponId) ?? empty.weapon };
+}
+
+export function selectWeapon(settings: Settings, request: { id?: string; direction?: number; setupId?: string }): Settings {
   const next = structuredClone(settings), { game } = selected(next);
-  if (request.direction === 1 || request.direction === -1) {
-    const configured = game.weapons.filter(w => w.profile);
+  if (request.setupId !== undefined) {
+    const { weapon } = selected(next);
+    if (!weapon.id) throw new Error('Add a weapon before selecting an attachment setup.');
+    if (request.id !== undefined || request.direction !== undefined || typeof request.setupId !== 'string' || request.setupId !== 'base' && !weapon.setups.some(s => s.id === request.setupId)) throw new Error('Choose an attachment setup in this weapon.');
+    weapon.selectedSetupId = request.setupId;
+  } else if (request.direction === 1 || request.direction === -1) {
+    const configured = game.weapons.filter(w => activeSetup(w).profile);
     if (!configured.length) throw new Error('Configure a weapon pattern before cycling weapons.');
     const index = configured.findIndex(w => w.id === game.selectedWeaponId);
     game.selectedWeaponId = configured[(index < 0 ? (request.direction === 1 ? 0 : configured.length - 1) : index + request.direction + configured.length) % configured.length].id;
@@ -173,12 +229,13 @@ export function selectWeapon(settings: Settings, request: { id?: string; directi
 }
 
 export function effectiveProfile(settings: Settings): WeaponProfile | null {
-  const { game, weapon } = selected(settings);
+  const { game, weapon: owner } = selected(settings);
+  const weapon = activeSetup(owner);
   if (!weapon.profile) return null;
   const reference = weapon.calibration;
   const sensitivityScale = reference ? reference.sensitivity / game.input.sensitivity : 1;
   return {
-    ...structuredClone(weapon.profile), name: weapon.name,
+    ...structuredClone(weapon.profile), name: owner.name,
     recoils: weapon.profile.recoils.map(recoil => {
       const adsScale = reference && recoil.activate.includes('aiming') ? reference.adsMultiplier / game.input.adsMultiplier : 1;
       return { ...recoil, multipliers: [
@@ -190,7 +247,7 @@ export function effectiveProfile(settings: Settings): WeaponProfile | null {
 }
 
 export function tuningLimits(settings: Settings): [number, number][] | undefined {
-  const profile = selected(settings).weapon.profile;
+  const profile = activeSetup(selected(settings).weapon).profile;
   if (!profile) return undefined;
   // A saved multiplier is only one way to represent strength. Its remaining
   // headroom must not limit tuning when that strength can be folded into vectors.
@@ -203,7 +260,7 @@ export function tuningLimits(settings: Settings): [number, number][] | undefined
 
 export function applyLiveTuning(settings: Settings, draft: TuningState): Settings {
   const next = structuredClone(settings);
-  const weapon = selected(next).weapon;
+  const weapon = activeSetup(selected(next).weapon);
   if (!weapon.profile || draft.stances.length !== weapon.profile.recoils.length) throw new Error('The tuning draft does not match this weapon.');
   const limits = tuningLimits(settings)!;
   const counts = weapon.profile.units === 'counts';
@@ -238,7 +295,7 @@ export class SettingsStore {
     if (!existsSync(this.path)) return defaultSettings();
     try {
       const contents = readFileSync(this.path, 'utf8');
-      if (contents.length > 2_000_000) throw new Error('Settings file is too large.');
+      if (contents.length > 20_000_000) throw new Error('Settings file is too large.');
       return validateSettings(JSON.parse(contents));
     } catch (error) {
       this.warning = `Saved settings could not be loaded. The original file will be backed up when you save. ${String(error)}`;
@@ -247,9 +304,11 @@ export class SettingsStore {
   }
   save(value: unknown): Settings {
     const settings = validateSettings(value);
+    const contents = `${JSON.stringify(settings, null, 2)}\n`;
+    if (contents.length > 20_000_000) throw new Error('Settings file is too large.');
     mkdirSync(dirname(this.path), { recursive: true });
     if (existsSync(this.path)) copyFileSync(this.path, `${this.path}.backup`);
-    writeFileSync(`${this.path}.tmp`, `${JSON.stringify(settings, null, 2)}\n`, 'utf8');
+    writeFileSync(`${this.path}.tmp`, contents, 'utf8');
     renameSync(`${this.path}.tmp`, this.path);
     this.warning = null;
     return settings;

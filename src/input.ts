@@ -1,9 +1,28 @@
-import type { Stroke } from 'node-interception';
+// Keep the portable engine independent of the optional Windows native addon.
+export type Stroke = {
+  type: 'mouse';
+  state: number;
+  flags: number;
+  rolling: number;
+  x: number;
+  y: number;
+  information: number;
+} | {
+  type: 'keyboard';
+  code: number;
+  state: number;
+  information: number;
+};
 
 export type Key = 'enter' | 'plus' | 'escape' | 'control' | 'controlRight' | 'shift' | 'shiftRight'
   | `f${number}` | `num${number}` | `key${string}` | 'alt' | 'altRight'
   | 'home' | 'end' | 'insert' | 'delete' | 'pageup' | 'pagedown' | 'space' | 'minus'
-  | 'left' | 'right' | 'up' | 'down';
+  | 'left' | 'right' | 'up' | 'down' | 'mouse3' | 'mouse4' | 'mouse5' | `stance:${string}`;
+
+export function postureFromKeys(keys: ReadonlySet<Key>): string | null {
+  for (const key of keys) if (key.startsWith('stance:')) return key.slice(7);
+  return keys.has('control') || keys.has('controlRight') ? 'crouching' : null;
+}
 
 export interface InputDevice {
   readonly id: number;

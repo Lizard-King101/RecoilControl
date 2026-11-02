@@ -88,3 +88,32 @@ test('worker refuses both shortcut and HUD switches with a dirty tuning draft', 
     assert.equal(f.messages.at(-1).type, 'weapon-select');
   } finally { await f.command('shutdown'); }
 });
+
+test('hold compensation stops on release and cannot be latched through GUI commands', async () => {
+  const f = workerFixture(), c = config(); c.bindings = { ...c.bindings, toggle:'mouse4', activationMode:'hold' };
+  try {
+    await f.command('configure',c);
+    await assert.rejects(f.command('enabled',true), /Hold your assigned/);
+    f.input.keyDown('mouse4'); await f.tick(); assert.equal(f.state.enabled,true);
+    f.input.keyDown('control'); await f.command('suspend',false); await f.tick(); assert.equal(f.state.enabled,true);
+    assert.equal(f.state.stance,'Crouch'); f.input.keyUp('control');
+    f.input.mouse('left',true); await f.tick(); assert.ok(f.board.moves.length);
+    f.input.keyUp('mouse4'); await f.tick(); assert.equal(f.state.enabled,false);
+    const count = f.board.moves.length; await f.tick(); assert.equal(f.board.moves.length,count);
+    f.input.keyDown('mouse4'); await f.tick(); assert.equal(f.state.enabled,true); assert.equal(f.state.paused,true);
+    await f.command('suspend',true); assert.equal(f.state.enabled,false);
+    await f.command('suspend',false); f.input.keyDown('mouse4'); await f.tick(); assert.equal(f.state.enabled,false);
+    f.input.keyUp('mouse4'); f.input.mouse('left',false); f.input.keyDown('mouse4'); await f.tick(); assert.equal(f.state.enabled,true);
+  } finally { await f.command('shutdown'); }
+});
+test('release of hold binding during weapon switching invalidates the pending resume', async () => {
+  const f = workerFixture(), c = config(); c.bindings = { ...c.bindings, toggle:'mouse5', activationMode:'hold' };
+  try {
+    await f.command('configure',c); f.input.keyDown('mouse5'); await f.tick(); f.tap('f6');
+    const request = f.messages.findLast(m=>m.type==='weapon-select'); assert.equal(request.resume,true);
+    f.input.keyUp('mouse5'); await f.command('switch-prepare');
+    await f.command('configure',{...c,resume:true,resumeEpoch:request.epoch});
+    assert.equal(f.state.enabled,false);
+    f.input.keyDown('mouse5'); await f.tick(); assert.equal(f.state.enabled,true);
+  } finally { await f.command('shutdown'); }
+});

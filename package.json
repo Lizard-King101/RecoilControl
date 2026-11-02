@@ -23,15 +23,24 @@
     "doctor": "npm run build && node build/index.js --doctor",
     "demo": "npm run build && node build/index.js --demo",
     "test": "npm run build && node --test tests/*.test.cjs",
+    "test:navigation-desktop": "npm run build && electron tests/navigation-desktop-smoke.cjs",
+    "test:stances-desktop": "npm run build && electron tests/stance-desktop-smoke.cjs",
     "test:desktop": "npm run build && electron tests/desktop-smoke.cjs",
     "screenshots": "npm run build && electron scripts/screenshots.cjs",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test:attachments-desktop": "npm run build && electron tests/attachments-desktop-smoke.cjs",
+    "test:vision-desktop": "npm run build && electron tests/vision-desktop-smoke.cjs",
+    "library:serve": "npm run build && node scripts/library-server.cjs",
+    "test:community-desktop": "npm run build && electron tests/community-desktop-smoke.cjs",
+    "test:deletion-desktop": "npm run build && electron tests/deletion-desktop-smoke.cjs"
   },
   "dependencies": {
     "esptool-js": "0.7.0",
-    "node-interception": "2.0.4",
     "serialport": "13.0.0",
     "uiohook-napi": "1.5.5"
+  },
+  "optionalDependencies": {
+    "node-interception": "2.0.4"
   },
   "devDependencies": {
     "@types/node": "24.19.2",

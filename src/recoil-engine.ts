@@ -4,6 +4,7 @@ export interface InputState {
   shooting: boolean;
   aiming: boolean;
   crouching: boolean;
+  posture?: string | null;
   paused: boolean;
 }
 
@@ -29,7 +30,8 @@ export class RecoilEngine {
         throw new Error(`Invalid recoil values in ${profile.name}.`);
       }
     }
-    this.profiles = [...weapon.recoils].sort((a, b) => b.activate.length - a.activate.length);
+    this.profiles = [...weapon.recoils].sort((a, b) => b.activate.length - a.activate.length
+      || Number(a.activate.includes('aiming')) - Number(b.activate.includes('aiming')));
     this.gains = weapon.recoils.map(() => [1, 1]);
   }
 
@@ -45,7 +47,8 @@ export class RecoilEngine {
   }
 
   get profile(): RecoilProfile {
-    return this.profiles.find(profile => profile.activate.every(condition => this.input[condition]))!;
+    const posture = this.input.posture === undefined ? (this.input.crouching ? 'crouching' : null) : this.input.posture;
+    return this.profiles.find(profile => profile.activate.every(condition => condition === 'aiming' ? this.input.aiming : condition === posture))!;
   }
 
   get paused(): boolean { return this.input.paused; }

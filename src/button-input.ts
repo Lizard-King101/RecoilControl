@@ -18,6 +18,7 @@ export function loadButtonInput(options: { mouse?: boolean } = {}): ButtonInput 
     const up = (event: { keycode: number }) => { const key = keys.get(event.keycode); if (key) listener.keyUp(key); };
     const mouse = (button: unknown, pressed: boolean) => {
       if (button === 1 || button === 2) listener.mouse(button === 1 ? 'left' : 'right', pressed);
+      if (button === 3 || button === 4 || button === 5) listener[pressed ? 'keyDown' : 'keyUp'](`mouse${button}`);
     };
     const mouseDown = (event: { button: unknown }) => mouse(event.button, true);
     const mouseUp = (event: { button: unknown }) => mouse(event.button, false);

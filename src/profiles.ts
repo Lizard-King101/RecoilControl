@@ -1,5 +1,6 @@
 export type Vector = readonly [number, number];
-export type Condition = 'aiming' | 'crouching';
+// "aiming" is ADS; other IDs refer to a game's mutually exclusive postures.
+export type Condition = string;
 
 export interface RecoilProfile {
   readonly name: string;
